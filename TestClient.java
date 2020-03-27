@@ -7,7 +7,6 @@ import java.rmi.registry.Registry;
 import java.security.NoSuchAlgorithmException;
 
 public class TestClient {
-
     private String peerAccessAPoint;
 
     public TestClient(String[] args) throws FileNotFoundException, IOException {
@@ -21,7 +20,6 @@ public class TestClient {
             System.err.println("Client exception: " + e.toString());
             e.printStackTrace();
         }
-
     }
 
     private void parseArgs(String[] args, RemoteInterface remote)
@@ -31,7 +29,7 @@ public class TestClient {
 
         switch (command) {
             case "BACKUP": {
-                remote.backup(fileName,replicationDegree);
+                remote.backup(fileName, replicationDegree);
                 break;
             }
             case "RESTORE": {
@@ -53,7 +51,7 @@ public class TestClient {
     }
 
     private void backup(String fileName, int replicationDegree) throws FileNotFoundException, IOException {
-        String version = "000";
+        String version = "1.0";
         int senderID = 1;
         int fileID = 1; // sha256
         int chunkNumber = 1;
@@ -68,12 +66,14 @@ public class TestClient {
         fileInputStream.read(body); // read file into bytes[]
         fileInputStream.close();
 
-        // <Version> PUTCHUNK <SenderID> <FileID> <ChunkNo> <ReplicationDeg> <CRLF> <CRLF> <Body>
-        String message = version + " PUTCHUNK " + senderID + " " + fileID + " " + chunkNumber + " " + replicationDegree + " " + CRLF + CRLF + " " + body;
+        // <Version> PUTCHUNK <SenderID> <FileID> <ChunkNo> <ReplicationDeg> <CRLF>
+        // <CRLF> <Body>
+        String message = version + " PUTCHUNK " + senderID + " " + fileID + " " + chunkNumber + " " + replicationDegree
+                + " " + CRLF + CRLF + " " + body;
     }
 
     private void restore(String fileName) {
-        String version = "000";
+        String version = "1.0";
         int senderID = 1;
         int fileID = 1; // usar sha256
         int chunkNo = 1;
@@ -84,7 +84,7 @@ public class TestClient {
     }
 
     private void delete(String fileName) {
-        String version = "000";
+        String version = "1.0";
         int senderID = 1;
         int fileID = 1; // usar sha256
         String CRLF = "0xD0xA";
@@ -94,7 +94,7 @@ public class TestClient {
     }
 
     private void reclaim(int space) {
-        String version = "000";
+        String version = "1.0";
         int senderID = 1;
         int fileID = 1; // usar sha256
         int chunkNo = 1;
