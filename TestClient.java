@@ -26,6 +26,7 @@ public class TestClient {
             throws FileNotFoundException, IOException, NoSuchAlgorithmException {
         String command = args[1], fileName = args[2];
         int replicationDegree = Integer.parseInt(args[3]);
+        System.out.println("Replication degree is " + replicationDegree);
 
         switch (command) {
             case "BACKUP": {
@@ -51,7 +52,7 @@ public class TestClient {
     }
 
     private void backup(String fileName, int replicationDegree) throws FileNotFoundException, IOException {
-        String version = "1.0";
+        String protocolVersion = "1.0";
         int senderID = 1;
         int fileID = 1; // sha256
         int chunkNumber = 1;
@@ -68,39 +69,39 @@ public class TestClient {
 
         // <Version> PUTCHUNK <SenderID> <FileID> <ChunkNo> <ReplicationDeg> <CRLF>
         // <CRLF> <Body>
-        String message = version + " PUTCHUNK " + senderID + " " + fileID + " " + chunkNumber + " " + replicationDegree
-                + " " + CRLF + CRLF + " " + body;
+        String message = protocolVersion + " PUTCHUNK " + senderID + " " + fileID + " " + chunkNumber + " "
+                + replicationDegree + " " + CRLF + CRLF + " " + body;
     }
 
     private void restore(String fileName) {
-        String version = "1.0";
+        String protocolVersion = "1.0";
         int senderID = 1;
         int fileID = 1; // usar sha256
         int chunkNo = 1;
         String CRLF = "0xD0xA";
 
-        String message = version + " GETCHUNK " + senderID + " " + fileID + " " + chunkNo + " " + CRLF + CRLF;
+        String message = protocolVersion + " GETCHUNK " + senderID + " " + fileID + " " + chunkNo + " " + CRLF + CRLF;
         // <Version> GETCHUNK <SenderID> <FileID> <ChunkNo> <CRLF><CRLF>
     }
 
     private void delete(String fileName) {
-        String version = "1.0";
+        String protocolVersion = "1.0";
         int senderID = 1;
         int fileID = 1; // usar sha256
         String CRLF = "0xD0xA";
 
-        String message = version + " DELETE " + senderID + " " + fileID + " " + CRLF + CRLF;
+        String message = protocolVersion + " DELETE " + senderID + " " + fileID + " " + CRLF + CRLF;
         // <Version> DELETE <SenderID> <FileID> <CRLF><CRLF>
     }
 
     private void reclaim(int space) {
-        String version = "1.0";
+        String protocolVersion = "1.0";
         int senderID = 1;
         int fileID = 1; // usar sha256
         int chunkNo = 1;
         String CRLF = "0xD0xA";
 
-        String message = version + " REMOVED " + senderID + " " + fileID + " " + chunkNo + " " + CRLF + CRLF;
+        String message = protocolVersion + " REMOVED " + senderID + " " + fileID + " " + chunkNo + " " + CRLF + CRLF;
         // <Version> REMOVED <SenderID> <FileID> <ChunkNo> <CRLF><CRLF>
     }
 }

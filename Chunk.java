@@ -5,9 +5,29 @@ public class Chunk {
     private int size;
 
     public Chunk(int ID, String fileID, int size) {
-        this.ID = ID;
-        this.fileID = fileID;
+        this.setID(ID);
+        this.setFileID(fileID);
         this.size = size;
+    }
+
+    public String getFileID() {
+        return fileID;
+    }
+
+    public void setFileID(String fileID) {
+        this.fileID = fileID;
+    }
+
+    public int getID() {
+        return ID;
+    }
+
+    public void setID(int iD) {
+        this.ID = iD;
+    }
+
+    public byte[] getData() {
+        return this.data;
     }
 
     public void setData(byte[] data) {

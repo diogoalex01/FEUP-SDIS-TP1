@@ -6,12 +6,13 @@ import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 
 public class FileMetadata {
     private String ID;
     private File file;
-    private ArrayList<Chunk> chunks;
     private int replicationDegree;
+    private ArrayList<Chunk> chunks;
 
     private static final int MAX_CHUNK_SIZE = 64000;
 
@@ -21,25 +22,34 @@ public class FileMetadata {
 
         this.ID = toHexString(md.digest(hashInput.getBytes(StandardCharsets.UTF_8)));
         this.file = file;
-        this.replicationDegree = replicationDegree;
+        this.setReplicationDegree(replicationDegree);
         this.chunks = new ArrayList<>();
-
-        System.out.println("string is " + hashInput);
-        System.out.println("SHA is " + this.ID);
     }
 
     public String getID() {
         return this.ID;
     }
 
+    public int getReplicationDegree() {
+        return replicationDegree;
+    }
+
+    public void setReplicationDegree(int replicationDegree) {
+        this.replicationDegree = replicationDegree;
+    }
+
+    public ArrayList<Chunk> getChunks() {
+        return chunks;
+    }
+
     public static String toHexString(byte[] hash) {
-        // Convert byte array into signum representation
+        // convert byte array into signum representation
         BigInteger number = new BigInteger(1, hash);
 
-        // Convert message digest into hex value
+        // convert message digest into hex value
         StringBuilder hexString = new StringBuilder(number.toString(16));
 
-        // Pad with leading zeros
+        // pad with leading zeros
         while (hexString.length() < 32) {
             hexString.insert(0, '0');
         }
@@ -52,14 +62,17 @@ public class FileMetadata {
         int chunkNumber = body.length / MAX_CHUNK_SIZE;
         int remainder = body.length % MAX_CHUNK_SIZE;
         int chunkCounter = 0;
-        System.out.println("length = " + body.length);
-        System.out.println("chunks = " + chunkNumber);
+        int lastIndex = 0;
+
         for (; chunkCounter < chunkNumber; chunkCounter++) {
             Chunk chunk = new Chunk(chunkCounter, this.ID, MAX_CHUNK_SIZE);
+            chunk.setData(Arrays.copyOfRange(body, lastIndex, lastIndex + MAX_CHUNK_SIZE));
+            lastIndex += MAX_CHUNK_SIZE;
             chunks.add(chunk);
         }
-        
+
         Chunk chunk = new Chunk(chunkCounter, this.ID, remainder);
+        chunk.setData(Arrays.copyOfRange(body, lastIndex, lastIndex + remainder));
         chunks.add(chunk);
-    }
+    } 
 }
