@@ -1,6 +1,4 @@
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.io.*;
 import java.nio.file.Files;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
@@ -23,11 +21,12 @@ import java.net.MulticastSocket;
 import java.util.Random;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 
-// java Peer 1.0 1 AP1 230.0.0.0 231.0.0.0 232.0.0.0
+// java Peer 1.0 1 AP1 230.0.0.0 4445 231.0.0.0 4446 232.0.0.0 4447
 
 public class Peer implements RemoteInterface {
-    private String ID;
+    private static String ID;
     private String accessPoint;
     private String protocolVersion;
     private InetAddress group;
@@ -40,10 +39,14 @@ public class Peer implements RemoteInterface {
     private MulticastSocket MCSocket;
     private MulticastSocket MDBSocket;
     private MulticastSocket MDRSocket;
-    private StoreRecord storeRecord;
+    private static StoredRecord storedRecord;
+    private static StoredChunks storedChunks;
+    private static String storageDirPath;
+    private static String storagePathRecord;
+    private static String storagePathChunks;
 
     private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
-    private static final String CRLF = "\r\n"; // CRLF
+    private static final String CRLF = "\r\n"; // CRLF delimiter
     private static final int INITIAL_WAITING_TIME = 1000; // 1 second
     private static final int MAX_ATTEMPTS = 5;
 
@@ -107,8 +110,14 @@ public class Peer implements RemoteInterface {
 
         if (command.equals("STORED")) {
             System.out.println("STORED");
-            storeRecord.getChunk(key).updateActualReplicationDegree(1);
-            System.out.println("Updating store count");
+            if (storedChunks.getChunkInfo(key) != null) {
+                storedChunks.getChunkInfo(key).updateActualReplicationDegree(1);
+                System.out.println("Updating store count");
+            }
+            if (storedRecord.getChunkInfo(key) != null) {
+                storedRecord.getChunkInfo(key).updateActualReplicationDegree(1);
+                System.out.println("Updating store count");
+            }
         }
     }
 
@@ -124,13 +133,14 @@ public class Peer implements RemoteInterface {
         String chunkNumber = receivedMessage[4];
         String replicationDegree = receivedMessage[5];
         String chunkBody = receivedMessage[7];
+        String key = makeKey(chunkNumber, fileID);
 
         if (senderID.equals(this.ID))
             return;
 
         if (command.equals("PUTCHUNK")) {
             System.out.println("PUTCHUNK");
-            String chunkFileName = this.ID + "_" + fileID + "_" + chunkNumber + ".txt";
+            String chunkFileName = storageDirPath + "/" + this.ID + "_" + fileID + "_" + chunkNumber + ".txt";
 
             // Check if file already exists
             try {
@@ -163,6 +173,9 @@ public class Peer implements RemoteInterface {
             byte[] storedBuf = storedMessage.getBytes();
             DatagramPacket storedReply = new DatagramPacket(storedBuf, storedBuf.length, MCGroup, MCPort);
             MCSocket.send(storedReply);
+            ChunkInfo chunkInfo = new ChunkInfo(Integer.parseInt(chunkNumber), fileID, chunkBody.length(),
+                    Integer.parseInt(replicationDegree));
+            storedChunks.insert(key, chunkInfo);
             System.out.println("Sent STORED");
         } else {
             System.out.println("PUTCHUNK command not found!");
@@ -180,7 +193,38 @@ public class Peer implements RemoteInterface {
         this.MCPort = Integer.parseInt(MCPort);
         this.MDBPort = Integer.parseInt(MDBPort);
         this.MDRPort = Integer.parseInt(MDRPort);
-        this.storeRecord = new StoreRecord();
+        storageDirPath = "Peer" + "_" + this.ID;
+        storagePathRecord = "Peer" + "_" + this.ID + "/record.ser";
+        storagePathChunks = "Peer" + "_" + this.ID + "/chunks.ser";
+        final Path dirPath = Paths.get(storageDirPath);
+        final Path pathRecord = Paths.get(storagePathRecord);
+        final Path pathChunk = Paths.get(storagePathChunks);
+        this.storedRecord = new StoredRecord();
+        this.storedChunks = new StoredChunks();
+
+        // Check if storage file already exists
+        try {
+            if (Files.exists(pathRecord)) {
+                System.out.println("Reading storage from " + pathRecord);
+                deserializeRecord();
+            } else {
+                Files.createDirectories(dirPath);
+                Files.write(pathRecord, new byte[0]);
+                System.out.println("Storage created under " + pathRecord);
+            }
+
+            if (Files.exists(pathChunk)) {
+                System.out.println("Reading storage from " + pathChunk);
+                deserializeChunks();
+            } else {
+                Files.createDirectories(dirPath);
+                Files.write(pathChunk, new byte[0]);
+                System.out.println("Storage created under " + pathChunk);
+            }
+        } catch (Exception e) {
+            System.err.println("Path exception: " + e.toString());
+            e.printStackTrace();
+        }
 
         // Join MC channel
         MCSocket = new MulticastSocket(this.MCPort);
@@ -229,6 +273,8 @@ public class Peer implements RemoteInterface {
             System.err.println("Peer exception: " + e.toString());
             e.printStackTrace();
         }
+
+        Runtime.getRuntime().addShutdownHook(new Thread(Peer::serialize));
     }
 
     public void backup(String fileName, int replicationDegree) throws IOException, NoSuchAlgorithmException {
@@ -286,11 +332,12 @@ public class Peer implements RemoteInterface {
         long limitTime = INITIAL_WAITING_TIME, startTime, elapsedTime;
 
         String chunkKey = makeKey(Integer.toString(chunk.getID()), fileID);
-        storeRecord.insert(chunkKey, chunk);
+        ChunkInfo chunkInfo = new ChunkInfo(chunk);
+        storedRecord.insert(chunkKey, chunkInfo);
 
         // Terminates after 5 unsuccessful attempts (2^n seconds) or when
         // the ammount of stores meets the desired replication degree
-        while (storeRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()
+        while (storedRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()
                 && timesSent < MAX_ATTEMPTS) {
             message = this.protocolVersion + " PUTCHUNK " + this.ID + " " + fileID + " " + chunk.getID() + " "
                     + replicationDegree + " " + CRLF + CRLF + " " + content;
@@ -300,20 +347,10 @@ public class Peer implements RemoteInterface {
             MDBSocket.send(commandPacket);
             timesSent++;
 
-            // long sent = System.currentTimeMillis();
-            // long elapsed;
-
-            // DatagramPacket replyPacket = new DatagramPacket(bufMC, bufMC.length, MCGroup,
-            // MCPort);
-            // Pattern pattern = Pattern.compile("STORED");
-            // Matcher matcher;
-
-            // MCSocket.setSoTimeout(waitingTime); // sets a timeout
-
             // Loops while the ammount of stores doesn't meet the desired replication degree
             startTime = System.currentTimeMillis();
 
-            while (storeRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()) {
+            while (storedRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()) {
                 elapsedTime = System.currentTimeMillis();
                 if (elapsedTime - startTime > limitTime) {
                     System.out.println("LIMIT: " + limitTime);
@@ -328,5 +365,64 @@ public class Peer implements RemoteInterface {
 
     public String makeKey(String chunkID, String fileID) {
         return chunkID + "_" + fileID;
+    }
+
+    public static void serialize() {
+        serializeChunks();
+        serializeRecord();
+    }
+
+    public static void serializeRecord() {
+        try {
+            FileOutputStream fileOutputStreamRecord = new FileOutputStream(storagePathRecord);
+            ObjectOutputStream objectOutputStreamRecord = new ObjectOutputStream(fileOutputStreamRecord);
+            objectOutputStreamRecord.writeObject(storedRecord);
+            objectOutputStreamRecord.close();
+            fileOutputStreamRecord.close();
+            System.out.println("Data was stored under " + storagePathRecord);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void deserializeRecord() {
+        try {
+            FileInputStream fileInputStreamRecord = new FileInputStream(storagePathRecord);
+            ObjectInputStream objectInputStreamRecord = new ObjectInputStream(fileInputStreamRecord);
+            storedRecord = (StoredRecord) objectInputStreamRecord.readObject();
+            objectInputStreamRecord.close();
+            fileInputStreamRecord.close();
+            storedRecord.print();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return;
+        }
+    }
+
+    public static void serializeChunks() {
+        try {
+            FileOutputStream fileOutputStreamChunks = new FileOutputStream(storagePathChunks);
+            ObjectOutputStream objectOutputStreamChunks = new ObjectOutputStream(fileOutputStreamChunks);
+            objectOutputStreamChunks.writeObject(storedChunks);
+            objectOutputStreamChunks.close();
+            fileOutputStreamChunks.close();
+            System.out.println("Data was stored under " + storagePathChunks);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void deserializeChunks() {
+        try {
+            FileInputStream fileInputStreamChunks = new FileInputStream(storagePathChunks);
+            ObjectInputStream objectInputStreamChunks = new ObjectInputStream(fileInputStreamChunks);
+            storedChunks = (StoredChunks) objectInputStreamChunks.readObject();
+            objectInputStreamChunks.close();
+            fileInputStreamChunks.close();
+            storedChunks.print();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return;
+        }
     }
 }
