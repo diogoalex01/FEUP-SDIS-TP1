@@ -3,11 +3,15 @@ public class Chunk {
     private String fileID;
     private byte[] data;
     private int size;
+    private int desiredReplicationDegree;
+    private int actualReplicationDegree;
 
-    public Chunk(int ID, String fileID, int size) {
+    public Chunk(int ID, String fileID, int size, int replicationDegree) {
         this.setID(ID);
         this.setFileID(fileID);
         this.size = size;
+        this.desiredReplicationDegree = replicationDegree;
+        this.actualReplicationDegree = 0;
     }
 
     public String getFileID() {
@@ -32,5 +36,25 @@ public class Chunk {
 
     public void setData(byte[] data) {
         this.data = data;
+    }
+
+    public int getDesiredReplicationDegree() {
+        return desiredReplicationDegree;
+    }
+
+    public void setDesiredReplicationDegree(int desiredReplicationDegree) {
+        this.desiredReplicationDegree = desiredReplicationDegree;
+    }
+
+    public int getActualReplicationDegree() {
+        return actualReplicationDegree;
+    }
+
+    public void setActualReplicationDegree(int actualReplicationDegree) {
+        this.actualReplicationDegree += actualReplicationDegree;
+    }
+
+    public void updateActualReplicationDegree(int actualReplicationDegree) {
+        this.actualReplicationDegree += actualReplicationDegree;
     }
 }

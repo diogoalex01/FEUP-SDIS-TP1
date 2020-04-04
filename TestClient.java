@@ -60,7 +60,7 @@ public class TestClient {
         System.out.println("exception");
 
         File file = new File(fileName);
-        // init array with file length
+        // Init array with file length
         byte[] body = new byte[(int) file.length()];
 
         FileInputStream fileInputStream = new FileInputStream(file);

@@ -43,13 +43,13 @@ public class FileMetadata {
     }
 
     public static String toHexString(byte[] hash) {
-        // convert byte array into signum representation
+        // Convert byte array into signum representation
         BigInteger number = new BigInteger(1, hash);
 
-        // convert message digest into hex value
+        // Convert message digest into hex value
         StringBuilder hexString = new StringBuilder(number.toString(16));
 
-        // pad with leading zeros
+        // Pad with leading zeros
         while (hexString.length() < 32) {
             hexString.insert(0, '0');
         }
@@ -65,13 +65,13 @@ public class FileMetadata {
         int lastIndex = 0;
 
         for (; chunkCounter < chunkNumber; chunkCounter++) {
-            Chunk chunk = new Chunk(chunkCounter, this.ID, MAX_CHUNK_SIZE);
+            Chunk chunk = new Chunk(chunkCounter, this.ID, MAX_CHUNK_SIZE, replicationDegree);
             chunk.setData(Arrays.copyOfRange(body, lastIndex, lastIndex + MAX_CHUNK_SIZE));
             lastIndex += MAX_CHUNK_SIZE;
             chunks.add(chunk);
         }
 
-        Chunk chunk = new Chunk(chunkCounter, this.ID, remainder);
+        Chunk chunk = new Chunk(chunkCounter, this.ID, remainder, replicationDegree);
         chunk.setData(Arrays.copyOfRange(body, lastIndex, lastIndex + remainder));
         chunks.add(chunk);
     } 

@@ -8,7 +8,6 @@ import java.rmi.server.UnicastRemoteObject;
 import java.security.NoSuchAlgorithmException;
 
 import java.net.DatagramPacket;
-import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
@@ -41,9 +40,10 @@ public class Peer implements RemoteInterface {
     private MulticastSocket MCSocket;
     private MulticastSocket MDBSocket;
     private MulticastSocket MDRSocket;
+    private StoreRecord storeRecord;
 
     private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
-    private static final String CRLF = "0xD0xA"; // CRLF
+    private static final String CRLF = "\r\n"; // CRLF
     private static final int INITIAL_WAITING_TIME = 1000; // 1 second
     private static final int MAX_ATTEMPTS = 5;
 
@@ -52,13 +52,14 @@ public class Peer implements RemoteInterface {
         DatagramPacket packet = new DatagramPacket(buf, buf.length, MCGroup, MCPort);
 
         public void run() {
-            // try {
-            // MCSocket.receive(packet);
-            // String received = new String(packet.getData(), 0, packet.getLength());
-            // parseMessageMC(received);
-            // } catch (IOException e) {
-            // e.printStackTrace();
-            // }
+            try {
+                MCSocket.receive(packet);
+                String received = new String(packet.getData(), 0, packet.getLength());
+
+                parseMessageMC(received);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
     };
 
@@ -93,13 +94,27 @@ public class Peer implements RemoteInterface {
     };
 
     public void parseMessageMC(String received) {
-        if (received.indexOf(" " + this.ID + " ") != -1)
-            return;
+        // <Version> STORED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
+        System.out.println("REC: " + received);
+        String[] receivedMessage = received.split("[\\s]+");
+        System.out.println("Size : " + receivedMessage.length);
+        String protocolVersion = receivedMessage[0];
+        String command = receivedMessage[1];
+        String senderID = receivedMessage[2];
+        String fileID = receivedMessage[3];
+        String chunkNumber = receivedMessage[4];
+        String key = makeKey(chunkNumber, fileID);
+
+        if (command.equals("STORED")) {
+            System.out.println("STORED");
+            storeRecord.getChunk(key).updateActualReplicationDegree(1);
+            System.out.println("Updating store count");
+        }
     }
 
     public void parseMessageMDB(String received) throws IOException, InterruptedException {
-        // System.out.println("received:" + received);
-
+        // <Version> PUTCHUNK <SenderId> <FileId> <ChunkNo> <ReplicationDeg>
+        // <CRLF><CRLF> <Body>
         Random rand = new Random();
         String[] receivedMessage = received.split("[\\s]+", 8);
         String protocolVersion = receivedMessage[0];
@@ -130,22 +145,21 @@ public class Peer implements RemoteInterface {
                 System.err.println("Path exception: " + e.toString());
                 e.printStackTrace();
             }
-            System.out.println("111");
 
             // Store chunk
             FileWriter fileWriter = new FileWriter(chunkFileName);
             fileWriter.write(chunkBody);
             fileWriter.close();
-            System.out.println("222");
 
             // Wait random amount of time
             int randomTime = rand.nextInt(400);
             Thread.sleep(randomTime);
-            System.out.println("waited "+ randomTime);
+            System.out.println("waited " + randomTime);
 
             // Reply to sender
             // <Version> STORED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
-            String storedMessage = this.protocolVersion + "STORED" + this.ID + " ";
+            String storedMessage = this.protocolVersion + " STORED " + this.ID + " " + fileID + " " + chunkNumber + " "
+                    + CRLF + CRLF;
             byte[] storedBuf = storedMessage.getBytes();
             DatagramPacket storedReply = new DatagramPacket(storedBuf, storedBuf.length, MCGroup, MCPort);
             MCSocket.send(storedReply);
@@ -166,6 +180,7 @@ public class Peer implements RemoteInterface {
         this.MCPort = Integer.parseInt(MCPort);
         this.MDBPort = Integer.parseInt(MDBPort);
         this.MDRPort = Integer.parseInt(MDRPort);
+        this.storeRecord = new StoreRecord();
 
         // Join MC channel
         MCSocket = new MulticastSocket(this.MCPort);
@@ -208,7 +223,7 @@ public class Peer implements RemoteInterface {
             RemoteInterface stub = (RemoteInterface) UnicastRemoteObject.exportObject(obj, 0);
             // Bind the remote object's stub in the registry
             Registry registry = LocateRegistry.getRegistry();
-            registry.bind(peerAccessPoint, stub);
+            registry.rebind(peerAccessPoint, stub);
             System.err.println("Peer ready");
         } catch (Exception e) {
             System.err.println("Peer exception: " + e.toString());
@@ -264,15 +279,19 @@ public class Peer implements RemoteInterface {
 
     public void sendStopAndWait(Chunk chunk, int replicationDegree, String fileID) throws IOException, SocketException {
         String message = "";
-        int storeCounter = 0;
+        int storeCounter = 0, timesSent = 0;
         byte[] bufMDB = new byte[BACKUP_BUFFER_SIZE];
         byte[] bufMC = new byte[256];
         String content = new String(chunk.getData());
-        int waitingTime = INITIAL_WAITING_TIME, timesSent = 0;
+        long limitTime = INITIAL_WAITING_TIME, startTime, elapsedTime;
 
-        // Terminates after 5 unsuccessful attempts (2^n) or when the
-        // ammount of stores meets the desired replication degree
-        while (storeCounter < replicationDegree && timesSent < MAX_ATTEMPTS) {
+        String chunkKey = makeKey(Integer.toString(chunk.getID()), fileID);
+        storeRecord.insert(chunkKey, chunk);
+
+        // Terminates after 5 unsuccessful attempts (2^n seconds) or when
+        // the ammount of stores meets the desired replication degree
+        while (storeRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()
+                && timesSent < MAX_ATTEMPTS) {
             message = this.protocolVersion + " PUTCHUNK " + this.ID + " " + fileID + " " + chunk.getID() + " "
                     + replicationDegree + " " + CRLF + CRLF + " " + content;
 
@@ -281,50 +300,33 @@ public class Peer implements RemoteInterface {
             MDBSocket.send(commandPacket);
             timesSent++;
 
-            long sent = System.currentTimeMillis();
-            long elapsed;
+            // long sent = System.currentTimeMillis();
+            // long elapsed;
 
-            DatagramPacket replyPacket = new DatagramPacket(bufMC, bufMC.length, MCGroup, MCPort);
-            Pattern pattern = Pattern.compile("STORED");
-            Matcher matcher;
+            // DatagramPacket replyPacket = new DatagramPacket(bufMC, bufMC.length, MCGroup,
+            // MCPort);
+            // Pattern pattern = Pattern.compile("STORED");
+            // Matcher matcher;
 
-            MCSocket.setSoTimeout(waitingTime);
+            // MCSocket.setSoTimeout(waitingTime); // sets a timeout
 
             // Loops while the ammount of stores doesn't meet the desired replication degree
-            while (storeCounter < replicationDegree) {
-                try {
-                    System.out.println("1111111111111");
-                    MCSocket.receive(replyPacket); // sets a timeout
-                    System.out.println("2222222222222");
-                    matcher = pattern.matcher(new String(replyPacket.getData()));
-                    System.out.println("3333333333333");
+            startTime = System.currentTimeMillis();
 
-                    if (matcher.find()) {
-                        storeCounter++;
-                        System.out.println("storeCounter ++" + storeCounter);
-                        if (storeCounter >= replicationDegree) {
-                            System.out.println("storeCounter >= replicationDegree");
-                            break;
-                        }
-                        System.out.println("Received STORED");
-                    } else {
-                        System.out.println("No reply packet received!");
-                    }
-
-                    elapsed = System.currentTimeMillis();
-                } catch (Exception e) {
-                    waitingTime *= 2; // Doubles the waiting time every unsuccessful attempt
-                    System.out.println("Trying again: " + waitingTime);
+            while (storeRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()) {
+                elapsedTime = System.currentTimeMillis();
+                if (elapsedTime - startTime > limitTime) {
+                    System.out.println("LIMIT: " + limitTime);
+                    limitTime *= 2;
                     break;
                 }
-            }
-
-            // If replication degree condition has been met, exits loop            
-            if (storeCounter >= replicationDegree) {
-                break;
             }
         }
 
         System.out.println("Backed up chunk " + chunk.getID());
+    }
+
+    public String makeKey(String chunkID, String fileID) {
+        return chunkID + "_" + fileID;
     }
 }
