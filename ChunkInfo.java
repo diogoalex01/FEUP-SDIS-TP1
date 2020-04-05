@@ -8,8 +8,8 @@ public class ChunkInfo implements Serializable {
     private int actualReplicationDegree;
 
     public ChunkInfo(int ID, String fileID, int size, int replicationDegree) {
-        this.setID(ID);
-        this.setFileID(fileID);
+        this.ID = ID;
+        this.fileID = fileID;
         this.size = size;
         this.desiredReplicationDegree = replicationDegree;
         this.actualReplicationDegree = 0;

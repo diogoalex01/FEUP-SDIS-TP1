@@ -25,7 +25,10 @@ public class TestClient {
     private void parseArgs(String[] args, RemoteInterface remote)
             throws FileNotFoundException, IOException, NoSuchAlgorithmException {
         String command = args[1], fileName = args[2];
-        int replicationDegree = Integer.parseInt(args[3]);
+        int replicationDegree = 0;
+        if(args.length > 3){
+            replicationDegree = Integer.parseInt(args[3]);
+        }
         System.out.println("Replication degree is " + replicationDegree);
 
         switch (command) {
@@ -34,15 +37,15 @@ public class TestClient {
                 break;
             }
             case "RESTORE": {
-                restore(fileName);
+                // remote.restore(fileName);
                 break;
             }
             case "DELETE": {
-                delete(fileName);
+                remote.delete(fileName);
                 break;
             }
             case "RECLAIM": {
-                reclaim(Integer.parseInt(fileName)); // check
+                // remote.reclaim(Integer.parseInt(fileName)); // check
                 break;
             }
             case "STATE": {

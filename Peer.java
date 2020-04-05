@@ -1,5 +1,4 @@
 import java.io.*;
-import java.nio.file.Files;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
@@ -21,6 +20,7 @@ import java.net.MulticastSocket;
 import java.util.Random;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 
 // java Peer 1.0 1 AP1 230.0.0.0 4445 231.0.0.0 4446 232.0.0.0 4447
@@ -29,6 +29,7 @@ public class Peer implements RemoteInterface {
     private static String ID;
     private String accessPoint;
     private String protocolVersion;
+    private int availableStorage;
     private InetAddress group;
     private InetAddress MCGroup;
     private InetAddress MDBGroup;
@@ -59,7 +60,6 @@ public class Peer implements RemoteInterface {
             try {
                 MCSocket.receive(packet);
                 String received = new String(packet.getData(), 0, packet.getLength());
-
                 parseMessageMC(received);
             } catch (IOException e) {
                 e.printStackTrace();
@@ -98,26 +98,51 @@ public class Peer implements RemoteInterface {
     };
 
     public void parseMessageMC(String received) {
-        // <Version> STORED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
         System.out.println("REC: " + received);
-        String[] receivedMessage = received.split("[\\s]+");
+        String[] receivedMessage = received.split("[\\u0020]+"); // blank space UTF-8
         String protocolVersion = receivedMessage[0];
         String command = receivedMessage[1];
         String senderID = receivedMessage[2];
         String fileID = receivedMessage[3];
-        String chunkNumber = receivedMessage[4];
-        String key = makeKey(chunkNumber, fileID);
 
+        // <Version> STORED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
         if (command.equals("STORED")) {
+            String chunkNumber = receivedMessage[4];
+            String key = makeKey(chunkNumber, fileID);
             System.out.println("STORED");
+
+            // Each chunk updates the replication degree of the files that it is storing
             if (storedChunks.getChunkInfo(key) != null) {
                 storedChunks.getChunkInfo(key).updateActualReplicationDegree(1);
                 System.out.println("Updating storeChunks");
             }
+            // Each chunk updates the replication degree of the
+            // files that are being stored by some other peer
             if (storedRecord.getChunkInfo(key) != null) {
                 storedRecord.getChunkInfo(key).updateActualReplicationDegree(1);
                 System.out.println("Updating storeRecord");
             }
+        }
+        // <Version> DELETE <SenderId> <FileId> <CRLF><CRLF>
+        else if (command.equals("DELETE")) {
+            File file = new File(this.storageDirPath + "/" + fileID);
+
+            if (file.exists()) {
+                String[] entries = file.list();
+                for (String entry : entries) {
+                    File currentFile = new File(file.getPath(), entry);
+                    currentFile.delete();
+                }
+
+                if (file.delete()) {
+                    System.out.println("File deleted successfully");
+                } else {
+                    System.out.println("Failed to delete the file");
+                }
+            }
+
+            storedChunks.removeFileChunks(fileID);
+            storedRecord.removeFileChunks(fileID);
         }
     }
 
@@ -129,9 +154,9 @@ public class Peer implements RemoteInterface {
         String chunkBody = "";
 
         if (received.substring(received.length() - CRLF.length() - 1, received.length() - 1).equals(CRLF)) {
-            receivedMessage = received.split("[\\s]+", 7);
+            receivedMessage = received.split("[\\u0020]+", 7); // blank space UTF-8
         } else {
-            receivedMessage = received.split("[\\s]+", 8);
+            receivedMessage = received.split("[\\u0020]+", 8); // blank space UTF-8
             chunkBody = receivedMessage[7];
         }
 
@@ -146,15 +171,28 @@ public class Peer implements RemoteInterface {
         if (senderID.equals(this.ID))
             return;
 
+        // <Version> STORED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
+        String storedMessage = this.protocolVersion + " STORED " + this.ID + " " + fileID + " " + chunkNumber + " "
+                + CRLF + CRLF;
+        byte[] storedBuf = storedMessage.getBytes();
+        DatagramPacket storedReply = new DatagramPacket(storedBuf, storedBuf.length, MCGroup, MCPort);
+
         if (command.equals("PUTCHUNK")) {
-            // If the chunk has size 0B, it is ignored
+            // If the chunk has size 0 Bytes, it is ignored
             if (chunkBody.length() == 0) {
                 System.out.println("Empty chunk");
+                // Reply to sender
+                MCSocket.send(storedReply);
+                return;
+            }
+            // Only backs up the chunk if the peer has enough available storage
+            if (chunkBody.length() > this.availableStorage) {
                 return;
             }
 
             System.out.println("PUTCHUNK");
-            String chunkFileName = storageDirPath + "/" + this.ID + "_" + fileID + "_" + chunkNumber + ".txt";
+            String fileDirName = storageDirPath + "/" + fileID + "/";
+            String chunkFileName = fileDirName + chunkNumber + ".txt";
 
             // Check if file already exists
             try {
@@ -176,9 +214,10 @@ public class Peer implements RemoteInterface {
                 ChunkInfo chunkInfo = new ChunkInfo(Integer.parseInt(chunkNumber), fileID, chunkBody.length(),
                         Integer.parseInt(replicationDegree));
                 storedChunks.insert(key, chunkInfo);
-                // If the intended replication degree changed,
-                // it's updated so that it can be met
-            } else {
+            }
+            // If the intended replication degree changed,
+            // it's updated so that it can be met
+            else {
                 storedChunks.getChunkInfo(key).setDesiredReplicationDegree(Integer.parseInt(replicationDegree));
             }
 
@@ -192,18 +231,19 @@ public class Peer implements RemoteInterface {
                     .getDesiredReplicationDegree()) {
                 System.out.println("waited " + randomTime);
 
-                // Reply to sender
-                // <Version> STORED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
-                String storedMessage = this.protocolVersion + " STORED " + this.ID + " " + fileID + " " + chunkNumber
-                        + " " + CRLF + CRLF;
-                byte[] storedBuf = storedMessage.getBytes();
-                DatagramPacket storedReply = new DatagramPacket(storedBuf, storedBuf.length, MCGroup, MCPort);
-                MCSocket.send(storedReply);
-
                 // Store chunk
+                final Path fileDirPath = Paths.get(fileDirName);
+
+                if (Files.notExists(fileDirPath)) {
+                    Files.createDirectories(fileDirPath);
+                }
+
                 FileWriter fileWriter = new FileWriter(chunkFileName);
                 fileWriter.write(chunkBody);
                 fileWriter.close();
+                this.availableStorage -= chunkBody.length();
+                // Reply to sender
+                MCSocket.send(storedReply);
                 System.out.println("Sent STORED");
             } else {
                 System.out.println("Replication degree already achieved!");
@@ -232,6 +272,7 @@ public class Peer implements RemoteInterface {
         final Path pathChunk = Paths.get(storagePathChunks);
         this.storedRecord = new StoredRecord();
         this.storedChunks = new StoredChunks();
+        this.availableStorage = 128000;
 
         // Check if storage file already exists
         try {
@@ -261,19 +302,19 @@ public class Peer implements RemoteInterface {
         MCSocket = new MulticastSocket(this.MCPort);
         MCSocket.joinGroup(MCGroup);
         ScheduledExecutorService MCScheduler = Executors.newScheduledThreadPool(1);
-        ScheduledFuture<?> MCtimer = MCScheduler.scheduleWithFixedDelay(ReadMC, 1, 100, MILLISECONDS);
+        ScheduledFuture<?> MCtimer = MCScheduler.scheduleWithFixedDelay(ReadMC, 1, 50, MILLISECONDS);
 
         // Join MDB channel
         MDBSocket = new MulticastSocket(this.MDBPort);
         MDBSocket.joinGroup(MDBGroup);
         ScheduledExecutorService MDBScheduler = Executors.newScheduledThreadPool(1);
-        ScheduledFuture<?> MDBtimer = MDBScheduler.scheduleWithFixedDelay(ReadMDB, 1, 100, MILLISECONDS);
+        ScheduledFuture<?> MDBtimer = MDBScheduler.scheduleWithFixedDelay(ReadMDB, 1, 50, MILLISECONDS);
 
         // Join MDR channel
         MDRSocket = new MulticastSocket(this.MDRPort);
         MDRSocket.joinGroup(MDRGroup);
         ScheduledExecutorService MDRScheduler = Executors.newScheduledThreadPool(1);
-        ScheduledFuture<?> MDRtimer = MDRScheduler.scheduleWithFixedDelay(ReadMDR, 1, 100, MILLISECONDS);
+        ScheduledFuture<?> MDRtimer = MDRScheduler.scheduleWithFixedDelay(ReadMDR, 1, 50, MILLISECONDS);
     }
 
     public static void main(String[] args) {
@@ -305,6 +346,7 @@ public class Peer implements RemoteInterface {
             e.printStackTrace();
         }
 
+        // Saves the storage when the peer is interrupted
         Runtime.getRuntime().addShutdownHook(new Thread(Peer::serialize));
     }
 
@@ -317,20 +359,21 @@ public class Peer implements RemoteInterface {
 
         // <Version> PUTCHUNK <SenderID> <FileID> <ChunkNo> <ReplicationDeg> <CRLF>
         // <CRLF> <Body>
-        String message = "";
+        System.out.println("Made " + fileMetadata.getChunks().size() + " chunks");
         for (Chunk chunk : fileMetadata.getChunks()) {
             sendStopAndWait(chunk, replicationDegree, fileID);
         }
     }
 
     public void sendStopAndWait(Chunk chunk, int replicationDegree, String fileID) throws IOException, SocketException {
-        String message = "";
+        String putChunkMessage = "";
         int timesSent = 0;
-        byte[] bufMDB = new byte[BACKUP_BUFFER_SIZE];
+        byte[] putChunkBuf = new byte[BACKUP_BUFFER_SIZE];
         String content = new String(chunk.getData());
         long limitTime = INITIAL_WAITING_TIME, startTime, elapsedTime;
         String chunkKey = makeKey(Integer.toString(chunk.getID()), fileID);
 
+        // If the file is not store, it's added to the storage record
         if (storedRecord.getChunkInfo(chunkKey) == null) {
             ChunkInfo chunkInfo = new ChunkInfo(chunk);
             storedRecord.insert(chunkKey, chunkInfo);
@@ -340,21 +383,21 @@ public class Peer implements RemoteInterface {
         // the ammount of stores meets the desired replication degree
         while (storedRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()
                 && timesSent < MAX_ATTEMPTS) {
-            message = this.protocolVersion + " PUTCHUNK " + this.ID + " " + fileID + " " + chunk.getID() + " "
+            putChunkMessage = this.protocolVersion + " PUTCHUNK " + this.ID + " " + fileID + " " + chunk.getID() + " "
                     + replicationDegree + " " + CRLF + CRLF + " " + content;
 
-            bufMDB = message.getBytes();
-            DatagramPacket commandPacket = new DatagramPacket(bufMDB, bufMDB.length, MDBGroup, MDBPort);
-            MDBSocket.send(commandPacket);
-            timesSent++;
+            putChunkBuf = putChunkMessage.getBytes();
+            DatagramPacket putChunkPacket = new DatagramPacket(putChunkBuf, putChunkBuf.length, MDBGroup, MDBPort);
+            MDBSocket.send(putChunkPacket);
 
-            // Loops while the ammount of stores doesn't meet the desired replication degree
+            timesSent++;
             startTime = System.currentTimeMillis();
 
+            // Loops while the ammount of stores doesn't meet the desired replication degree
             while (storedRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()) {
                 elapsedTime = System.currentTimeMillis();
                 if (elapsedTime - startTime > limitTime) {
-                    System.out.println("LIMIT: " + limitTime);
+                    System.out.println("Waited: " + limitTime + " ms... Resending...");
                     limitTime *= 2;
                     break;
                 }
@@ -366,6 +409,33 @@ public class Peer implements RemoteInterface {
 
     public String makeKey(String chunkID, String fileID) {
         return chunkID + "_" + fileID;
+    }
+
+    public void delete(String fileName) throws IOException, NoSuchAlgorithmException {
+        try {
+            final Path path = Paths.get(fileName);
+
+            // Check if any of the file's chunks is being stored by the peer
+            if (!Files.exists(path)) {
+                System.out.println("File does not exist!");
+                return;
+            }
+
+        } catch (Exception e) {
+            System.err.println("Path exception: " + e.toString());
+            e.printStackTrace();
+        }
+
+        File file = new File(fileName);
+        FileMetadata fileMetadata = new FileMetadata(file, 0);
+        String fileID = fileMetadata.getID();
+
+        // <Version> DELETE <SenderId> <FileId> <CRLF><CRLF>
+        String deleteMessage = this.protocolVersion + " DELETE " + this.ID + " " + fileID + " " + CRLF + CRLF;
+        byte[] deleteBuf = deleteMessage.getBytes();
+
+        DatagramPacket deletePacket = new DatagramPacket(deleteBuf, deleteBuf.length, MCGroup, MCPort);
+        MCSocket.send(deletePacket);
     }
 
     public static void serialize() {

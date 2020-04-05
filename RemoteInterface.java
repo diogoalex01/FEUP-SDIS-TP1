@@ -9,4 +9,6 @@ import java.security.NoSuchAlgorithmException;
 public interface RemoteInterface extends Remote {
     void backup(String filepath, int replicationDegree)
             throws IOException, FileNotFoundException, NoSuchAlgorithmException, RemoteException;
+
+    void delete(String filepath) throws IOException, NoSuchAlgorithmException;
 }

@@ -74,5 +74,5 @@ public class FileMetadata {
         Chunk chunk = new Chunk(chunkCounter, this.ID, remainder, replicationDegree);
         chunk.setData(Arrays.copyOfRange(body, lastIndex, lastIndex + remainder));
         chunks.add(chunk);
-    } 
+    }
 }

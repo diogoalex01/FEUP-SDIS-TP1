@@ -1,4 +1,7 @@
 import java.util.HashMap;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.io.Serializable;
 
 public class StoredRecord implements Serializable {
@@ -22,6 +25,12 @@ public class StoredRecord implements Serializable {
 
     public int getReplicationDegree(String key) {
         return storedRecord.get(key).getActualReplicationDegree();
+    }
+
+    public void removeFileChunks(String fileID) {
+        Set<String> set = storedRecord.keySet().stream().filter(string -> string.endsWith("_" + fileID))
+                .collect(Collectors.toSet());
+        storedRecord.keySet().removeAll(set);
     }
 
     public void print() {
