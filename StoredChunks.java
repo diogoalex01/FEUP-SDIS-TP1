@@ -12,6 +12,10 @@ public class StoredChunks implements Serializable {
         storedChunks.put(key, chunkInfo);
     }
 
+    public void remove(String key) {
+        storedChunks.remove(key);
+    }
+
     public ChunkInfo getChunkInfo(String key) {
         return storedChunks.get(key);
     }

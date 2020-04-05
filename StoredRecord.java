@@ -2,7 +2,7 @@ import java.util.HashMap;
 import java.io.Serializable;
 
 public class StoredRecord implements Serializable {
-    HashMap<String, ChunkInfo> storedRecord;  // Record of chunks stored in other peers
+    HashMap<String, ChunkInfo> storedRecord; // Record of chunks stored in other peers
 
     public StoredRecord() {
         storedRecord = new HashMap<String, ChunkInfo>();
@@ -10,6 +10,10 @@ public class StoredRecord implements Serializable {
 
     public void insert(String key, ChunkInfo chunkInfo) {
         storedRecord.put(key, chunkInfo);
+    }
+
+    public void remove(String key) {
+        storedRecord.remove(key);
     }
 
     public ChunkInfo getChunkInfo(String key) {
