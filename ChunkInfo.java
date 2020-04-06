@@ -1,6 +1,6 @@
 import java.io.Serializable;
 
-public class ChunkInfo implements Serializable {
+public class ChunkInfo implements Serializable, Comparable<ChunkInfo> {
     private int ID;
     private String fileID;
     private int size;
@@ -35,7 +35,7 @@ public class ChunkInfo implements Serializable {
         return ID;
     }
 
-    public void setID(int iD) {
+    public void setID(int ID) {
         this.ID = ID;
     }
 
@@ -65,5 +65,13 @@ public class ChunkInfo implements Serializable {
 
     public void updateActualReplicationDegree(int actualReplicationDegree) {
         this.actualReplicationDegree += actualReplicationDegree;
+    }
+
+    @Override
+    public int compareTo(ChunkInfo chunkInfo) {
+        if (ID < chunkInfo.getID())
+            return -1;
+        else
+            return 1;
     }
 }

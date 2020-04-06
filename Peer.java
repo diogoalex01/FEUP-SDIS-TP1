@@ -45,6 +45,7 @@ public class Peer implements RemoteInterface {
     private static String storageDirPath;
     private static String storagePathRecord;
     private static String storagePathChunks;
+    private RestoreRecord restoreRecord;
 
     private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
     private static final String CRLF = "\r\n"; // CRLF delimiter
@@ -61,7 +62,7 @@ public class Peer implements RemoteInterface {
                 MCSocket.receive(packet);
                 String received = new String(packet.getData(), 0, packet.getLength());
                 parseMessageMC(received);
-            } catch (IOException e) {
+            } catch (Exception e) {
                 e.printStackTrace();
             }
         }
@@ -90,14 +91,14 @@ public class Peer implements RemoteInterface {
             try {
                 MDRSocket.receive(packet);
                 String received = new String(packet.getData(), 0, packet.getLength());
-                // parseMessageMDR(received);
+                parseMessageMDR(received);
             } catch (IOException e) {
                 e.printStackTrace();
             }
         }
     };
 
-    public void parseMessageMC(String received) {
+    public void parseMessageMC(String received) throws IOException, InterruptedException {
         System.out.println("REC: " + received);
         String[] receivedMessage = received.split("[\\u0020]+"); // blank space UTF-8
         String protocolVersion = receivedMessage[0];
@@ -107,20 +108,20 @@ public class Peer implements RemoteInterface {
 
         // <Version> STORED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
         if (command.equals("STORED")) {
-            String chunkNumber = receivedMessage[4];
-            String key = makeKey(chunkNumber, fileID);
+            String chunkID = receivedMessage[4];
+            String key = makeKey(chunkID, fileID);
             System.out.println("STORED");
 
             // Each chunk updates the replication degree of the files that it is storing
             if (storedChunks.getChunkInfo(key) != null) {
                 storedChunks.getChunkInfo(key).updateActualReplicationDegree(1);
-                System.out.println("Updating storeChunks");
+                System.out.println("Updating storedChunks");
             }
             // Each chunk updates the replication degree of the
             // files that are being stored by some other peer
             if (storedRecord.getChunkInfo(key) != null) {
                 storedRecord.getChunkInfo(key).updateActualReplicationDegree(1);
-                System.out.println("Updating storeRecord");
+                System.out.println("Updating storedRecord");
             }
         }
         // <Version> DELETE <SenderId> <FileId> <CRLF><CRLF>
@@ -143,6 +144,38 @@ public class Peer implements RemoteInterface {
 
             storedChunks.removeFileChunks(fileID);
             storedRecord.removeFileChunks(fileID);
+        }
+        // <Version> GETCHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
+        else if (command.equals("GETCHUNK")) {
+            String chunkID = receivedMessage[4];
+            String fileFolder = this.storageDirPath + "/" + fileID;
+            File file = new File(fileFolder);
+            Random rand = new Random();
+
+            if (file.exists()) {
+                System.out.println("file exists");
+                File chunkFile = new File(fileFolder + "/" + chunkID + ".txt");
+
+                if (chunkFile.exists()) {
+                    System.out.println("Chunk file exists");
+                    byte[] content = Files.readAllBytes(chunkFile.toPath());
+                    // Wait random amount of time
+                    int randomTime = rand.nextInt(RANDOM_TIME);
+                    Thread.sleep(randomTime);
+                    String key = makeKey(chunkID, fileID);
+
+                    if (!restoreRecord.isRestored(key)) {
+                        System.out.println("not restored");
+                        // <Version> CHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF> <Body>
+                        String chunkMessage = this.protocolVersion + " CHUNK " + this.ID + " " + fileID + " " + chunkID
+                                + " " + CRLF + CRLF + " " + new String(content);
+
+                        byte[] chunkBuf = chunkMessage.getBytes();
+                        DatagramPacket chunkPacket = new DatagramPacket(chunkBuf, chunkBuf.length, MDRGroup, MDRPort);
+                        MDRSocket.send(chunkPacket);
+                    }
+                }
+            }
         }
     }
 
@@ -202,14 +235,13 @@ public class Peer implements RemoteInterface {
                     System.out.println("File already exists!");
                     return;
                 }
-
             } catch (Exception e) {
                 System.err.println("Path exception: " + e.toString());
                 e.printStackTrace();
             }
 
             // Only stores a new entry if the chunk wasn't
-            // already backed up by any of the peers
+            // already backed up by any of the other peers
             if (storedChunks.getChunkInfo(key) == null) {
                 ChunkInfo chunkInfo = new ChunkInfo(Integer.parseInt(chunkNumber), fileID, chunkBody.length(),
                         Integer.parseInt(replicationDegree));
@@ -253,6 +285,60 @@ public class Peer implements RemoteInterface {
         }
     }
 
+    public void parseMessageMDR(String received) {
+        // <Version> CHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF> <Body>
+        System.out.println("1");
+        Random rand = new Random();
+        System.out.println("1.1");
+        String[] receivedMessage = received.split("[\\u0020]+", 7); // blank space UTF-8
+        System.out.println("1.2\nReceived message size = " + receivedMessage.length);
+        String chunkBody = receivedMessage[6];
+        System.out.println("2");
+
+        String protocolVersion = receivedMessage[0];
+        String command = receivedMessage[1];
+        String senderID = receivedMessage[2];
+        String fileID = receivedMessage[3];
+        String chunkNumber = receivedMessage[4];
+        String key = makeKey(chunkNumber, fileID);
+        System.out.println("3");
+
+        if (senderID.equals(this.ID)){
+            System.out.println("Fui eu que mandei");
+            return;
+        }
+        System.out.println("Nao fui eu que mandei");
+        System.out.println("Command is "+ command);
+        if (command.equals("CHUNK")) {
+            System.out.println("CHUNK");
+            String fileDirName = storageDirPath + "/" + fileID + "/";
+            String chunkFileName = fileDirName + chunkNumber + ".txt";
+
+            // Checks if the chunk belongs to a local file
+            if (storedRecord.getChunkInfo(key) == null) {
+                System.out.println("NOT MINE");
+                // Only stores a new key if the chunk wasn't
+                // already restored by any of the other peers
+                if (!restoreRecord.isRestored(key)) {
+                    restoreRecord.insertKey(key);
+                }
+            } else {
+                System.out.println("ITS MINE");
+                if (!restoreRecord.isRestored(key)) {
+                    System.out.println("ITS A NEW CHUNK");
+                    restoreRecord.insertKey(key);
+                    Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, chunkBody.length(), 0);
+                    chunk.setData(chunkBody.getBytes());
+                    restoreRecord.insertChunk(chunk);
+                }else{
+                    System.out.println("NOT NEW");
+                }
+            }
+        } else {
+            System.out.println("CHUNK command not found!");
+        }
+    }
+
     public Peer(String peerProtocolVersion, String peerID, String peerAccessPoint, String MCName, String MCPort,
             String MDBName, String MDBPort, String MDRName, String MDRPort) throws IOException {
         protocolVersion = peerProtocolVersion;
@@ -272,7 +358,8 @@ public class Peer implements RemoteInterface {
         final Path pathChunk = Paths.get(storagePathChunks);
         this.storedRecord = new StoredRecord();
         this.storedChunks = new StoredChunks();
-        this.availableStorage = 128000;
+        this.restoreRecord = new RestoreRecord();
+        this.availableStorage = 256000;
 
         // Check if storage file already exists
         try {
@@ -355,10 +442,8 @@ public class Peer implements RemoteInterface {
         byte[] body = Files.readAllBytes(file.toPath());
         FileMetadata fileMetadata = new FileMetadata(file, replicationDegree);
         String fileID = fileMetadata.getID();
-        fileMetadata.makeChunks();
 
-        // <Version> PUTCHUNK <SenderID> <FileID> <ChunkNo> <ReplicationDeg> <CRLF>
-        // <CRLF> <Body>
+        fileMetadata.makeChunks();
         System.out.println("Made " + fileMetadata.getChunks().size() + " chunks");
         for (Chunk chunk : fileMetadata.getChunks()) {
             sendStopAndWait(chunk, replicationDegree, fileID);
@@ -383,6 +468,9 @@ public class Peer implements RemoteInterface {
         // the ammount of stores meets the desired replication degree
         while (storedRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()
                 && timesSent < MAX_ATTEMPTS) {
+
+            // <Version> PUTCHUNK <SenderID> <FileID> <ChunkNo> <ReplicationDeg> <CRLF>
+            // <CRLF> <Body>
             putChunkMessage = this.protocolVersion + " PUTCHUNK " + this.ID + " " + fileID + " " + chunk.getID() + " "
                     + replicationDegree + " " + CRLF + CRLF + " " + content;
 
@@ -436,6 +524,60 @@ public class Peer implements RemoteInterface {
 
         DatagramPacket deletePacket = new DatagramPacket(deleteBuf, deleteBuf.length, MCGroup, MCPort);
         MCSocket.send(deletePacket);
+    }
+
+    public void restore(String fileName) throws IOException, NoSuchAlgorithmException {
+        File file = new File(fileName);
+        byte[] body = Files.readAllBytes(file.toPath());
+        FileMetadata fileMetadata = new FileMetadata(file, 0);
+        String fileID = fileMetadata.getID();
+        fileMetadata.makeChunks();
+        int numberChunks = fileMetadata.getChunks().size();
+
+        // TODO lancar um thread que les as respostas e faz a copia dos ficheiro
+        for (Chunk chunk : fileMetadata.getChunks()) {
+            if (chunk.getSize() == 0) {
+                numberChunks--;
+                continue;
+            }
+
+            // <Version> GETCHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
+            String getChunkMessage = this.protocolVersion + " GETCHUNK " + this.ID + " " + fileID + " " + chunk.getID()
+                    + " " + CRLF + CRLF;
+            byte[] getChunkBuf = getChunkMessage.getBytes();
+
+            DatagramPacket getChunkPacket = new DatagramPacket(getChunkBuf, getChunkBuf.length, MCGroup, MCPort);
+            MCSocket.send(getChunkPacket);
+        }
+
+        System.out.println("Waiting for "+numberChunks+" chunks...");
+        while (restoreRecord.getRestoredChunks().size() != numberChunks) {
+            System.out.println("I already have " +  restoreRecord.getRestoredChunks().size());
+        }
+        System.out.println("Chunks restored: " + restoreRecord.getRestoredChunks().size());
+        System.out.println("All chunks restored! Proceeding...");
+        assembleFile(fileName);
+        restoreRecord.printChunks();
+    }
+
+    public void assembleFile(String fileName) {
+        try {
+            FileWriter fileWriter = new FileWriter("copy_" + fileName, true);
+            // BufferedWriter bufferedWriter = new BufferedWriter(fileWriter);
+            // PrintWriter printWriter = new PrintWriter(bufferedWriter);
+
+            for (Chunk chunk : restoreRecord.getRestoredChunks()) {
+                String s = new String(chunk.getData());
+                // printWriter.print(chunk);
+                fileWriter.write(s);
+            }
+
+            // printWriter.close();
+            // bufferedWriter.close();
+            fileWriter.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     public static void serialize() {

@@ -37,7 +37,7 @@ public class TestClient {
                 break;
             }
             case "RESTORE": {
-                // remote.restore(fileName);
+                remote.restore(fileName);
                 break;
             }
             case "DELETE": {
