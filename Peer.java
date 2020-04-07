@@ -43,9 +43,12 @@ public class Peer implements RemoteInterface {
     private static StoredRecord storedRecord;
     private static StoredChunks storedChunks;
     private static String storageDirPath;
+    private static String backupDirPath;
+    private static String restoreDirPath;
     private static String storagePathRecord;
     private static String storagePathChunks;
     private RestoreRecord restoreRecord;
+    private volatile int restoredChunks = 0;
 
     private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
     private static final String CRLF = "\r\n"; // CRLF delimiter
@@ -126,7 +129,7 @@ public class Peer implements RemoteInterface {
         }
         // <Version> DELETE <SenderId> <FileId> <CRLF><CRLF>
         else if (command.equals("DELETE")) {
-            File file = new File(this.storageDirPath + "/" + fileID);
+            File file = new File(backupDirPath + "/" + fileID);
 
             if (file.exists()) {
                 String[] entries = file.list();
@@ -148,12 +151,12 @@ public class Peer implements RemoteInterface {
         // <Version> GETCHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
         else if (command.equals("GETCHUNK")) {
             String chunkID = receivedMessage[4];
-            String fileFolder = this.storageDirPath + "/" + fileID;
+            String fileFolder = backupDirPath + "/" + fileID;
             File file = new File(fileFolder);
             Random rand = new Random();
 
             if (file.exists()) {
-                System.out.println("file exists");
+                System.out.println("File exists");
                 File chunkFile = new File(fileFolder + "/" + chunkID + ".txt");
 
                 if (chunkFile.exists()) {
@@ -173,6 +176,7 @@ public class Peer implements RemoteInterface {
                         byte[] chunkBuf = chunkMessage.getBytes();
                         DatagramPacket chunkPacket = new DatagramPacket(chunkBuf, chunkBuf.length, MDRGroup, MDRPort);
                         MDRSocket.send(chunkPacket);
+                        System.out.println("Sent chunk with id: " + chunkID);
                     }
                 }
             }
@@ -224,7 +228,7 @@ public class Peer implements RemoteInterface {
             }
 
             System.out.println("PUTCHUNK");
-            String fileDirName = storageDirPath + "/" + fileID + "/";
+            String fileDirName = backupDirPath + "/" + fileID + "/";
             String chunkFileName = fileDirName + chunkNumber + ".txt";
 
             // Check if file already exists
@@ -287,13 +291,9 @@ public class Peer implements RemoteInterface {
 
     public void parseMessageMDR(String received) {
         // <Version> CHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF> <Body>
-        System.out.println("1");
         Random rand = new Random();
-        System.out.println("1.1");
         String[] receivedMessage = received.split("[\\u0020]+", 7); // blank space UTF-8
-        System.out.println("1.2\nReceived message size = " + receivedMessage.length);
         String chunkBody = receivedMessage[6];
-        System.out.println("2");
 
         String protocolVersion = receivedMessage[0];
         String command = receivedMessage[1];
@@ -301,37 +301,27 @@ public class Peer implements RemoteInterface {
         String fileID = receivedMessage[3];
         String chunkNumber = receivedMessage[4];
         String key = makeKey(chunkNumber, fileID);
-        System.out.println("3");
 
-        if (senderID.equals(this.ID)){
-            System.out.println("Fui eu que mandei");
+        if (senderID.equals(this.ID)) {
             return;
         }
-        System.out.println("Nao fui eu que mandei");
-        System.out.println("Command is "+ command);
         if (command.equals("CHUNK")) {
             System.out.println("CHUNK");
-            String fileDirName = storageDirPath + "/" + fileID + "/";
-            String chunkFileName = fileDirName + chunkNumber + ".txt";
 
             // Checks if the chunk belongs to a local file
             if (storedRecord.getChunkInfo(key) == null) {
-                System.out.println("NOT MINE");
                 // Only stores a new key if the chunk wasn't
                 // already restored by any of the other peers
                 if (!restoreRecord.isRestored(key)) {
                     restoreRecord.insertKey(key);
                 }
             } else {
-                System.out.println("ITS MINE");
                 if (!restoreRecord.isRestored(key)) {
-                    System.out.println("ITS A NEW CHUNK");
                     restoreRecord.insertKey(key);
                     Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, chunkBody.length(), 0);
                     chunk.setData(chunkBody.getBytes());
+                    System.out.println("New chunk with id: " + chunk.getID());
                     restoreRecord.insertChunk(chunk);
-                }else{
-                    System.out.println("NOT NEW");
                 }
             }
         } else {
@@ -351,8 +341,10 @@ public class Peer implements RemoteInterface {
         this.MDBPort = Integer.parseInt(MDBPort);
         this.MDRPort = Integer.parseInt(MDRPort);
         storageDirPath = "Peer" + "_" + this.ID;
-        storagePathRecord = "Peer" + "_" + this.ID + "/record.ser";
-        storagePathChunks = "Peer" + "_" + this.ID + "/chunks.ser";
+        backupDirPath = storageDirPath + "/Backup";
+        restoreDirPath = storageDirPath + "/Restore";
+        storagePathRecord = storageDirPath + "/record.ser";
+        storagePathChunks = storageDirPath + "/chunks.ser";
         final Path dirPath = Paths.get(storageDirPath);
         final Path pathRecord = Paths.get(storagePathRecord);
         final Path pathChunk = Paths.get(storagePathChunks);
@@ -404,6 +396,22 @@ public class Peer implements RemoteInterface {
         ScheduledFuture<?> MDRtimer = MDRScheduler.scheduleWithFixedDelay(ReadMDR, 1, 50, MILLISECONDS);
     }
 
+    public MulticastSocket getMCSocket() {
+        return this.MCSocket;
+    }
+
+    public MulticastSocket getMDBSocket() {
+        return this.MDBSocket;
+    }
+
+    public MulticastSocket getMDRSocket() {
+        return this.MDRSocket;
+    }
+
+    public RestoreRecord getRestoreRecord() {
+        return restoreRecord;
+    }
+
     public static void main(String[] args) {
         if (args.length != 9) {
             System.err.println("[Wrong number of arguments]");
@@ -438,6 +446,21 @@ public class Peer implements RemoteInterface {
     }
 
     public void backup(String fileName, int replicationDegree) throws IOException, NoSuchAlgorithmException {
+        try {
+            final Path path = Paths.get(fileName);
+
+            // Check if any of the file's chunks is being stored by the peer
+            if (!Files.exists(path)) {
+                System.out.println("File does not exist!");
+                return;
+            }
+
+        } catch (Exception e) {
+            System.err.println("Path exception: " + e.toString());
+            e.printStackTrace();
+            return;
+        }
+
         File file = new File(fileName);
         byte[] body = Files.readAllBytes(file.toPath());
         FileMetadata fileMetadata = new FileMetadata(file, replicationDegree);
@@ -512,6 +535,7 @@ public class Peer implements RemoteInterface {
         } catch (Exception e) {
             System.err.println("Path exception: " + e.toString());
             e.printStackTrace();
+            return;
         }
 
         File file = new File(fileName);
@@ -527,6 +551,21 @@ public class Peer implements RemoteInterface {
     }
 
     public void restore(String fileName) throws IOException, NoSuchAlgorithmException {
+        try {
+            final Path path = Paths.get(fileName);
+
+            // Check if any of the file's chunks is being stored by the peer
+            if (!Files.exists(path)) {
+                System.out.println("File does not exist!");
+                return;
+            }
+
+        } catch (Exception e) {
+            System.err.println("Path exception: " + e.toString());
+            e.printStackTrace();
+            return;
+        }
+
         File file = new File(fileName);
         byte[] body = Files.readAllBytes(file.toPath());
         FileMetadata fileMetadata = new FileMetadata(file, 0);
@@ -534,7 +573,13 @@ public class Peer implements RemoteInterface {
         fileMetadata.makeChunks();
         int numberChunks = fileMetadata.getChunks().size();
 
-        // TODO lancar um thread que les as respostas e faz a copia dos ficheiro
+        // If one of the chunks is not stored, the file itself should not be as well
+        String key = makeKey(Integer.toString(fileMetadata.getChunks().get(0).getID()), fileID);
+        if (storedRecord.getChunkInfo(key) == null) {
+            System.out.println("That file was not successfully stored by any peer!");
+            return;
+        }
+
         for (Chunk chunk : fileMetadata.getChunks()) {
             if (chunk.getSize() == 0) {
                 numberChunks--;
@@ -550,30 +595,38 @@ public class Peer implements RemoteInterface {
             MCSocket.send(getChunkPacket);
         }
 
-        System.out.println("Waiting for "+numberChunks+" chunks...");
-        while (restoreRecord.getRestoredChunks().size() != numberChunks) {
-            System.out.println("I already have " +  restoreRecord.getRestoredChunks().size());
+        System.out.println("Waiting for " + numberChunks + " chunks...");
+
+        while (true) {
+            restoredChunks = restoreRecord.getRestoredChunks().size();
+            // System.out.println(restoredChunks);
+            if (restoredChunks == numberChunks) {
+                System.out.println("entrei aqui, portanto vou sair");
+                break;
+            }
         }
-        System.out.println("Chunks restored: " + restoreRecord.getRestoredChunks().size());
-        System.out.println("All chunks restored! Proceeding...");
+
+        System.out.println(restoreRecord.getRestoredChunks().size() + " chunks restored! Proceeding...");
         assembleFile(fileName);
         restoreRecord.printChunks();
     }
 
     public void assembleFile(String fileName) {
         try {
-            FileWriter fileWriter = new FileWriter("copy_" + fileName, true);
-            // BufferedWriter bufferedWriter = new BufferedWriter(fileWriter);
-            // PrintWriter printWriter = new PrintWriter(bufferedWriter);
+            // Store chunk
+            final Path restoreDirPath = Paths.get(this.restoreDirPath);
 
-            for (Chunk chunk : restoreRecord.getRestoredChunks()) {
-                String s = new String(chunk.getData());
-                // printWriter.print(chunk);
-                fileWriter.write(s);
+            if (Files.notExists(restoreDirPath)) {
+                Files.createDirectories(restoreDirPath);
             }
 
-            // printWriter.close();
-            // bufferedWriter.close();
+            FileWriter fileWriter = new FileWriter(restoreDirPath + "/" + fileName, true);
+
+            for (Chunk chunk : restoreRecord.getRestoredChunks()) {
+                String string = new String(chunk.getData());
+                fileWriter.write(string);
+            }
+
             fileWriter.close();
         } catch (Exception e) {
             e.printStackTrace();
