@@ -14,7 +14,7 @@ public class FileMetadata {
     private int replicationDegree;
     private ArrayList<Chunk> chunks;
 
-    private static final int MAX_CHUNK_SIZE = 64;
+    private static final int MAX_CHUNK_SIZE = 64000;
 
     public FileMetadata(File file, int replicationDegree) throws NoSuchAlgorithmException, IOException {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
