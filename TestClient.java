@@ -1,7 +1,6 @@
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.security.NoSuchAlgorithmException;
@@ -17,94 +16,45 @@ public class TestClient {
             RemoteInterface remote = (RemoteInterface) registry.lookup(peerAccessAPoint);
             parseArgs(args, remote);
         } catch (Exception e) {
-            System.err.println("Client exception: " + e.toString());
+            System.err.println("Test Client exception: " + e.toString());
             e.printStackTrace();
         }
     }
 
     private void parseArgs(String[] args, RemoteInterface remote)
             throws FileNotFoundException, IOException, NoSuchAlgorithmException {
-        String command = args[1], fileName = args[2];
-        int replicationDegree = 0;
-        if(args.length > 3){
-            replicationDegree = Integer.parseInt(args[3]);
-        }
-        System.out.println("Replication degree is " + replicationDegree);
+        String peerAP = args[0];
+        String subProtocol = args[1];
+        String opnd1 = "", opnd2 = "";
+        int replicationDegree;
 
-        switch (command) {
+        if (args.length > 2) {
+            opnd1 = args[2];
+            if (args.length > 3) {
+                opnd2 = args[3];
+            }
+        }
+
+        switch (subProtocol) {
             case "BACKUP": {
-                remote.backup(fileName, replicationDegree);
+                remote.backup(opnd1, Integer.parseInt(args[3]));
                 break;
             }
             case "RESTORE": {
-                remote.restore(fileName);
+                remote.restore(opnd1);
                 break;
             }
             case "DELETE": {
-                remote.delete(fileName);
+                remote.delete(opnd1);
                 break;
             }
             case "RECLAIM": {
-                // remote.reclaim(Integer.parseInt(fileName)); // check
+                remote.reclaim(Integer.parseInt(opnd1));
                 break;
             }
             case "STATE": {
                 break;
             }
         }
-    }
-
-    private void backup(String fileName, int replicationDegree) throws FileNotFoundException, IOException {
-        String protocolVersion = "1.0";
-        int senderID = 1;
-        int fileID = 1; // sha256
-        int chunkNumber = 1;
-        String CRLF = "0xD0xA";
-        System.out.println("exception");
-
-        File file = new File(fileName);
-        // Init array with file length
-        byte[] body = new byte[(int) file.length()];
-
-        FileInputStream fileInputStream = new FileInputStream(file);
-        fileInputStream.read(body); // read file into bytes[]
-        fileInputStream.close();
-
-        // <Version> PUTCHUNK <SenderID> <FileID> <ChunkNo> <ReplicationDeg> <CRLF>
-        // <CRLF> <Body>
-        String message = protocolVersion + " PUTCHUNK " + senderID + " " + fileID + " " + chunkNumber + " "
-                + replicationDegree + " " + CRLF + CRLF + " " + body;
-    }
-
-    private void restore(String fileName) {
-        String protocolVersion = "1.0";
-        int senderID = 1;
-        int fileID = 1; // usar sha256
-        int chunkNo = 1;
-        String CRLF = "0xD0xA";
-
-        String message = protocolVersion + " GETCHUNK " + senderID + " " + fileID + " " + chunkNo + " " + CRLF + CRLF;
-        // <Version> GETCHUNK <SenderID> <FileID> <ChunkNo> <CRLF><CRLF>
-    }
-
-    private void delete(String fileName) {
-        String protocolVersion = "1.0";
-        int senderID = 1;
-        int fileID = 1; // usar sha256
-        String CRLF = "0xD0xA";
-
-        String message = protocolVersion + " DELETE " + senderID + " " + fileID + " " + CRLF + CRLF;
-        // <Version> DELETE <SenderID> <FileID> <CRLF><CRLF>
-    }
-
-    private void reclaim(int space) {
-        String protocolVersion = "1.0";
-        int senderID = 1;
-        int fileID = 1; // usar sha256
-        int chunkNo = 1;
-        String CRLF = "0xD0xA";
-
-        String message = protocolVersion + " REMOVED " + senderID + " " + fileID + " " + chunkNo + " " + CRLF + CRLF;
-        // <Version> REMOVED <SenderID> <FileID> <ChunkNo> <CRLF><CRLF>
     }
 }
