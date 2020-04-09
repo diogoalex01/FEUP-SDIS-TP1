@@ -1,29 +1,29 @@
 import java.util.Set;
-import java.util.HashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.Collection;
 import java.io.Serializable;
+import java.util.concurrent.*;
 
 public class StoredChunks implements Serializable {
-    HashMap<String, ChunkInfo> storedChunks; // Chunks stored in this peer
+    ConcurrentHashMap<String, ChunkInfo> storedChunks; // Chunks stored in this peer
     int occupiedStorage;
     int availableStorage;
 
     public StoredChunks() {
-        storedChunks = new HashMap<String, ChunkInfo>();
+        storedChunks = new ConcurrentHashMap<String, ChunkInfo>();
         this.occupiedStorage = 0; // bytes
         this.availableStorage = 256000; // bytes
     }
 
     public void insert(String key, ChunkInfo chunkInfo) {
-        storedChunks.put(key, chunkInfo);
+        storedChunks.putIfAbsent(key, chunkInfo);
         occupiedStorage += chunkInfo.getSize();
     }
 
     public void remove(String key) {
-        storedChunks.remove(key);
         occupiedStorage -= storedChunks.get(key).getSize();
+        storedChunks.remove(key);
     }
 
     public int getOccupiedStorage() {
@@ -32,14 +32,14 @@ public class StoredChunks implements Serializable {
 
     public void setOccupiedStorage(int occupiedStorage) {
         this.occupiedStorage = occupiedStorage;
-     }
+    }
 
     public int getAvailableStorage() {
         return this.availableStorage;
     }
 
     public void setAvailableStorage(int availableStorage) {
-       this.availableStorage = availableStorage;
+        this.availableStorage = availableStorage;
     }
 
     public Collection<ChunkInfo> getChunks() {

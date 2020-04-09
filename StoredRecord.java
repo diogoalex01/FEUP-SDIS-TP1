@@ -1,18 +1,18 @@
-import java.util.HashMap;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.io.Serializable;
+import java.util.concurrent.*;
 
 public class StoredRecord implements Serializable {
-    HashMap<String, ChunkInfo> storedRecord; // Record of chunks stored in other peers
+    ConcurrentHashMap<String, ChunkInfo> storedRecord; // Record of chunks stored in other peers
 
     public StoredRecord() {
-        storedRecord = new HashMap<String, ChunkInfo>();
+        storedRecord = new ConcurrentHashMap<String, ChunkInfo>();
     }
 
     public void insert(String key, ChunkInfo chunkInfo) {
-        storedRecord.put(key, chunkInfo);
+        storedRecord.putIfAbsent(key, chunkInfo);
     }
 
     public void remove(String key) {
