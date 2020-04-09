@@ -66,12 +66,7 @@ public class MCParser implements Runnable {
                     this.peer.getStoredChunks().getChunkInfo(key).updateActualReplicationDegree(1);
                     System.out.println("Updating storedChunks");
                 }
-                if (this.peer.getStoredRecord().getChunkInfo(key) != null) {
-                    System.out.println("STORED=> actual: "
-                            + this.peer.getStoredRecord().getChunkInfo(key).getActualReplicationDegree());
-                    System.out.println("STORED=> desired: "
-                            + this.peer.getStoredRecord().getChunkInfo(key).getDesiredReplicationDegree());
-                }
+
                 // Each chunk updates the replication degree of the
                 // files that are being stored by some other peer
                 if (this.peer.getStoredRecord().getChunkInfo(key) != null
@@ -79,6 +74,13 @@ public class MCParser implements Runnable {
                                 .getStoredRecord().getChunkInfo(key).getDesiredReplicationDegree()) {
                     this.peer.getStoredRecord().getChunkInfo(key).updateActualReplicationDegree(1);
                     System.out.println("Updating storedRecord");
+                }
+
+                if (this.peer.getStoredRecord().getChunkInfo(key) != null) {
+                    System.out.println("STORED=> actual: "
+                            + this.peer.getStoredRecord().getChunkInfo(key).getActualReplicationDegree());
+                    System.out.println("STORED=> desired: "
+                            + this.peer.getStoredRecord().getChunkInfo(key).getDesiredReplicationDegree());
                 }
             }
             // <Version> DELETE <SenderId> <FileId> <CRLF><CRLF>
@@ -123,7 +125,6 @@ public class MCParser implements Runnable {
                         String key = this.peer.makeKey(chunkID, fileID);
 
                         if (!this.peer.getRestoreRecord().isRestored(key)) {
-                            System.out.println("not restored");
                             // <Version> CHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF><Body>
                             String chunkMessage = this.peer.getProtocolVersion() + " CHUNK " + this.peer.getID() + " "
                                     + fileID + " " + chunkID + " " + CRLF + CRLF;
@@ -147,37 +148,36 @@ public class MCParser implements Runnable {
                 File file = new File(fileFolder);
                 byte[] chunkBody;
 
-                if (file.exists()) {
-                    System.out.println("Folder exists");
-                    File chunkFile = new File(fileFolder + "/" + chunkID);
+                // Each chunk updates the replication degree of
+                // the removed chunk that it is storing
+                if (this.peer.getStoredChunks().getChunkInfo(key) != null) {
+                    this.peer.getStoredChunks().getChunkInfo(key).updateActualReplicationDegree(-1);
+                    System.out.println("Updating storedChunks => -1 de RD");
 
-                    if (chunkFile.exists()) {
-                        chunkBody = Files.readAllBytes(chunkFile.toPath());
+                    if (file.exists()) {
+                        System.out.println("Folder exists");
+                        File chunkFile = new File(fileFolder + "/" + chunkID);
 
-                        // Each chunk updates the replication degree of the removed chunk that it is
-                        // storing
-                        if (this.peer.getStoredChunks().getChunkInfo(key) != null) {
-                            this.peer.getStoredChunks().getChunkInfo(key).updateActualReplicationDegree(-1);
-                            System.out.println("Updating storedChunks => -1 de RD");
+                        if (chunkFile.exists()) {
+                            chunkBody = Files.readAllBytes(chunkFile.toPath());
                             this.peer.getRemoveRecord().insertKey(key);
 
-                            // Creates new worker that updates RemoveRecord
-                            // this.executor.execute(new ReclaimWorker(this));
                             // Sleep
                             int randomTime = rand.nextInt(RANDOM_TIME);
                             Thread.sleep(randomTime);
-
-                            // if (putChunkSent) {
-                            // System.out.println("NInguem mandou, vou mandar");
-                            // Chunk chunk = new Chunk(Integer.parseInt(chunkID), fileID, chunkBody.length,
-                            // 0);
-                            // chunk.setData(chunkBody);
-                            // chunk.setActualReplicationDegree(
-                            // this.peer.getStoredChunks().getChunkInfo(key).getActualReplicationDegree());
-                            // chunk.setDesiredReplicationDegree(
-                            // this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree());
-                            // sendStopAndWait(chunk, chunk.getDesiredReplicationDegree(), fileID);
-                            // }
+                            
+                            if (this.peer.getRemoveRecord().wasRemoved(key)) {
+                                System.out.println("Ninguem mandou, vou mandar");
+                                Chunk chunk = new Chunk(Integer.parseInt(chunkID), fileID, chunkBody.length, 0);
+                                chunk.setData(chunkBody);
+                                chunk.setActualReplicationDegree(
+                                        this.peer.getStoredChunks().getChunkInfo(key).getActualReplicationDegree());
+                                chunk.setDesiredReplicationDegree(
+                                        this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree());
+                                this.peer.sendStopAndWait(chunk, chunk.getDesiredReplicationDegree(), fileID, key);
+                            } else {
+                                System.out.println("Ja foi mandado por outro");
+                            }
                         }
                     }
                 }

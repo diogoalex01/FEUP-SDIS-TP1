@@ -1,14 +1,15 @@
 import java.util.Set;
 import java.util.HashSet;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentSkipListSet;
 
 public class RestoreRecord {
-    Set<String> record; // Record of the restored chunks
-    Set<Chunk> restoredChunks;
+    ConcurrentSkipListSet<String> record; // Record of the restored chunks
+    ConcurrentSkipListSet<Chunk> restoredChunks;
 
     public RestoreRecord() {
-        record = new HashSet<String>();
-        restoredChunks = new TreeSet<Chunk>();
+        record = new ConcurrentSkipListSet<String>();
+        restoredChunks = new ConcurrentSkipListSet<Chunk>();
     }
 
     public void insertKey(String key) {

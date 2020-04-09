@@ -63,12 +63,14 @@ public class MDBParser implements Runnable {
             String chunkNumber = receivedMessage[4];
             String replicationDegree = receivedMessage[5];
             String key = this.peer.makeKey(chunkNumber, fileID);
+            int randomTime = rand.nextInt(RANDOM_TIME);
 
             // If a peer reads its own message
             // or if it receives a chunk it has previously backed up
-            if (senderID.equals(this.peer.getID()) || this.peer.getStoredRecord().getChunkInfo(key) != null)
+            if (senderID.equals(this.peer.getID()) || this.peer.getStoredRecord().getChunkInfo(key) != null) {
+                System.out.println("Tenho o original");
                 return;
-
+            }
             // <Version> STORED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
             String storedMessage = this.peer.getProtocolVersion() + " STORED " + this.peer.getID() + " " + fileID + " "
                     + chunkNumber + " " + CRLF + CRLF;
@@ -78,6 +80,10 @@ public class MDBParser implements Runnable {
 
             if (command.equals("PUTCHUNK")) {
                 System.out.println("PUTCHUNK");
+                if (this.peer.getRemoveRecord().wasRemoved(key)) {
+                    this.peer.getRemoveRecord().removeKey(key);
+                    return;
+                }
 
                 // If the chunk has size of 0 Bytes, it is ignored
                 if (chunkBody.length == 0) {
@@ -90,7 +96,7 @@ public class MDBParser implements Runnable {
                 // Only backs up the chunk if the peer has enough available storage
                 if (this.peer.getStoredChunks().getOccupiedStorage() + chunkBody.length > this.peer.getStoredChunks()
                         .getAvailableStorage()) {
-                    System.out.println("No space for this");
+                    System.out.println("No storage available to store a new chunk!");
                     return;
                 }
 
@@ -102,7 +108,9 @@ public class MDBParser implements Runnable {
                     final Path path = Paths.get(chunkFileName);
 
                     if (Files.exists(path)) {
-                        System.out.println("File already exists!");
+                        Thread.sleep(randomTime);
+                        System.out.println("Sent STORED because I'm storing it!");
+                        this.peer.getMCSocket().send(storedReply);
                         return;
                     }
                 } catch (Exception e) {
@@ -122,14 +130,9 @@ public class MDBParser implements Runnable {
                 else {
                     this.peer.getStoredChunks().getChunkInfo(key)
                             .setDesiredReplicationDegree(Integer.parseInt(replicationDegree));
-                    // if (this.putChunkSent) {
-                    // this.putChunkSent = false;
-                    // return;
-                    // }
                 }
 
                 // Wait random amount of time
-                int randomTime = rand.nextInt(RANDOM_TIME);
                 Thread.sleep(randomTime);
 
                 // Only actually stores the chunk (data) if the replication
@@ -149,11 +152,9 @@ public class MDBParser implements Runnable {
                     outputStream.write(chunkBody);
                     outputStream.close();
                     System.out.println("Sent STORED");
-                } else {
-                    System.out.println("Sent STORED with replication degree already achieved!");
+                    // Reply to sender
+                    this.peer.getMCSocket().send(storedReply);
                 }
-                // Reply to sender
-                this.peer.getMCSocket().send(storedReply);
             } else {
                 System.out.println("PUTCHUNK command not found!");
             }

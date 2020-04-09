@@ -244,7 +244,18 @@ public class Peer implements RemoteInterface {
             fileMetadata.makeChunks();
             System.out.println("Made " + fileMetadata.getChunks().size() + " chunks");
             for (Chunk chunk : fileMetadata.getChunks()) {
-                sendStopAndWait(chunk, replicationDegree, fileID);
+                String chunkKey = makeKey(Integer.toString(chunk.getID()), fileID);
+
+                // If the file is not stored, it's added to the storage record
+                if (storedRecord.getChunkInfo(chunkKey) == null) {
+                    ChunkInfo chunkInfo = new ChunkInfo(chunk);
+                    storedRecord.insert(chunkKey, chunkInfo);
+                } else {
+                    if (replicationDegree > storedRecord.getChunkInfo(chunkKey).getDesiredReplicationDegree()) {
+                        storedRecord.getChunkInfo(chunkKey).setDesiredReplicationDegree(replicationDegree);
+                    }
+                }
+                sendStopAndWait(chunk, replicationDegree, fileID, chunkKey);
             }
 
         } catch (Exception e) {
@@ -254,22 +265,12 @@ public class Peer implements RemoteInterface {
         }
     }
 
-    public void sendStopAndWait(Chunk chunk, int replicationDegree, String fileID) throws IOException, SocketException {
+    public void sendStopAndWait(Chunk chunk, int replicationDegree, String fileID, String chunkKey)
+            throws IOException, SocketException {
         String putChunkMessage = "";
         int timesSent = 0;
         byte[] putChunkBuf = new byte[BACKUP_BUFFER_SIZE], content = chunk.getData();
         long limitTime = INITIAL_WAITING_TIME, startTime, elapsedTime;
-        String chunkKey = makeKey(Integer.toString(chunk.getID()), fileID);
-
-        // If the file is not stored, it's added to the storage record
-        if (storedRecord.getChunkInfo(chunkKey) == null) {
-            ChunkInfo chunkInfo = new ChunkInfo(chunk);
-            storedRecord.insert(chunkKey, chunkInfo);
-        } else {
-            if (replicationDegree > storedRecord.getChunkInfo(chunkKey).getDesiredReplicationDegree()) {
-                storedRecord.getChunkInfo(chunkKey).setDesiredReplicationDegree(replicationDegree);
-            }
-        }
 
         // Terminates after 5 unsuccessful attempts (2^n seconds) or when
         // the ammount of stores meets the desired replication degree
@@ -285,22 +286,31 @@ public class Peer implements RemoteInterface {
             DatagramPacket putChunkPacket = new DatagramPacket(putChunkBuf, putChunkBuf.length, getMDBGroup(),
                     getMDBPort());
             getMDBSocket().send(putChunkPacket);
+            System.out.println("Sending chunk");
 
             timesSent++;
             startTime = System.currentTimeMillis();
+
             // Loops while the ammount of stores doesn't meet the desired replication degree
-            while (storedRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()) {
+            while (storedRecord.getChunkInfo(chunkKey) != null
+                    // Prevents peers sending PUTCHUNK caused by SPACE
+                    // RECLAIMING from being registered as the file owner
+                    ? storedRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()
+                    : storedChunks.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()) {
                 elapsedTime = System.currentTimeMillis();
                 if (elapsedTime - startTime > limitTime) {
                     limitTime *= 2;
                     break;
                 }
             }
-            System.out.println("Actual: " + storedRecord.getReplicationDegree(chunkKey));
-            System.out.println("Desired: " + chunk.getDesiredReplicationDegree());
-        } while (storedRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()
+            // System.out.println("Actual: " + storedRecord.getReplicationDegree(chunkKey));
+            // System.out.println("Desired: " + chunk.getDesiredReplicationDegree());
+        } while ((storedRecord.getChunkInfo(chunkKey) != null
+                // Prevents peers sending PUTCHUNK caused by SPACE
+                // RECLAIMING from being registered as the file owner
+                ? storedRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()
+                : storedChunks.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree())
                 && timesSent < MAX_ATTEMPTS);
-
         System.out.println("Backed up chunk " + chunk.getID());
     }
 
@@ -428,7 +438,6 @@ public class Peer implements RemoteInterface {
 
         while (true) {
             restoredChunks = restoreRecord.getRestoredChunks().size();
-            // System.out.println(restoredChunks);
             if (restoredChunks == numberChunks)
                 break;
         }
