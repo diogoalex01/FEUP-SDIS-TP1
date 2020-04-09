@@ -1,42 +1,20 @@
-import java.io.*;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
-
-import java.rmi.registry.LocateRegistry;
-import java.rmi.registry.Registry;
-import java.rmi.server.UnicastRemoteObject;
-
-import java.net.DatagramPacket;
-import java.net.InetAddress;
-import java.net.SocketException;
-import java.net.UnknownHostException;
-import java.net.MulticastSocket;
-import java.security.NoSuchAlgorithmException;
-
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.Random;
 import java.util.Arrays;
-
-import java.lang.Throwable;
+import java.util.Random;
+import java.net.DatagramPacket;
 
 public class MDBParser implements Runnable {
-    Peer peer;
-    DatagramPacket packet;
-
     private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
     private static final String CRLF = "\r\n"; // CRLF delimiter
     private static final int INITIAL_WAITING_TIME = 1000; // 1 second
     private static final int RANDOM_TIME = 400; // milliseconds
     private static final int MAX_ATTEMPTS = 5;
+    Peer peer;
+    DatagramPacket packet;
 
     public MDBParser(Peer peer, DatagramPacket packet) {
         this.peer = peer;

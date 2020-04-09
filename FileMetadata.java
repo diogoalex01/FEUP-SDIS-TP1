@@ -9,12 +9,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 
 public class FileMetadata {
+    private static final int MAX_CHUNK_SIZE = 64000;
     private String ID;
     private File file;
     private int replicationDegree;
     private ArrayList<Chunk> chunks;
-
-    private static final int MAX_CHUNK_SIZE = 64;
 
     public FileMetadata(File file, int replicationDegree) throws NoSuchAlgorithmException, IOException {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -24,6 +23,21 @@ public class FileMetadata {
         this.file = file;
         this.setReplicationDegree(replicationDegree);
         this.chunks = new ArrayList<>();
+    }
+
+    public static String toHexString(byte[] hash) {
+        // Convert byte array into signum representation
+        BigInteger number = new BigInteger(1, hash);
+
+        // Convert message digest into hex value
+        StringBuilder hexString = new StringBuilder(number.toString(16));
+
+        // Pad with leading zeros
+        while (hexString.length() < 32) {
+            hexString.insert(0, '0');
+        }
+
+        return hexString.toString();
     }
 
     public String getID() {
@@ -40,21 +54,6 @@ public class FileMetadata {
 
     public ArrayList<Chunk> getChunks() {
         return chunks;
-    }
-
-    public static String toHexString(byte[] hash) {
-        // Convert byte array into signum representation
-        BigInteger number = new BigInteger(1, hash);
-
-        // Convert message digest into hex value
-        StringBuilder hexString = new StringBuilder(number.toString(16));
-
-        // Pad with leading zeros
-        while (hexString.length() < 32) {
-            hexString.insert(0, '0');
-        }
-
-        return hexString.toString();
     }
 
     public void makeChunks() throws IOException {

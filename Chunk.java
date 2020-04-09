@@ -1,5 +1,3 @@
-import java.io.Serializable;
-
 public class Chunk extends ChunkInfo {
     private byte[] data;
 

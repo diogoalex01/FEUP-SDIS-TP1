@@ -1,35 +1,35 @@
 import java.io.*;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
-
+import java.net.DatagramPacket;
+import java.net.InetAddress;
+import java.net.MulticastSocket;
+import java.net.SocketException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
-
-import java.net.DatagramPacket;
-import java.net.InetAddress;
-import java.net.SocketException;
-import java.net.UnknownHostException;
-import java.net.MulticastSocket;
 import java.security.NoSuchAlgorithmException;
-
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.Random;
-import java.util.Arrays;
 
 // java Peer 1.0 1 AP1 230.0.0.0 4445 231.0.0.0 4446 232.0.0.0 4447
 
 public class Peer implements RemoteInterface {
+    private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
+    private static final String CRLF = "\r\n"; // CRLF delimiter
+    private static final int INITIAL_WAITING_TIME = 1000; // 1 second
+    private static final int RANDOM_TIME = 400; // milliseconds
+    private static final int MAX_ATTEMPTS = 5;
     private static String ID;
+    private static StoredRecord storedRecord;
+    private static StoredChunks storedChunks;
+    private static String storageDirPath;
+    private static String backupDirPath;
+    private static String restoreDirPath;
+    private static String storagePathRecord;
+    private static String storagePathChunks;
+    private static ScheduledThreadPoolExecutor executor;
     private String accessPoint;
     private String protocolVersion;
     private InetAddress MCGroup;
@@ -41,25 +41,10 @@ public class Peer implements RemoteInterface {
     private MulticastSocket MCSocket;
     private MulticastSocket MDBSocket;
     private MulticastSocket MDRSocket;
-    private static StoredRecord storedRecord;
-    private static StoredChunks storedChunks;
-    private static String storageDirPath;
-    private static String backupDirPath;
-    private static String restoreDirPath;
-    private static String storagePathRecord;
-    private static String storagePathChunks;
     private RestoreRecord restoreRecord;
     private volatile int restoredChunks = 0;
     private RemoveRecord removeRecord;
-    private static ScheduledThreadPoolExecutor executor;
     private MulticastManager multicastManager;
-
-    private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
-    private static final String CRLF = "\r\n"; // CRLF delimiter
-    private static final int INITIAL_WAITING_TIME = 1000; // 1 second
-    private static final int RANDOM_TIME = 400; // milliseconds
-    private static final int MAX_ATTEMPTS = 5;
-
     private boolean putChunkSent;
 
     public Peer(String peerProtocolVersion, String peerID, String peerAccessPoint, String MCName, String MCPort,
@@ -73,21 +58,21 @@ public class Peer implements RemoteInterface {
         this.MCPort = Integer.parseInt(MCPort);
         this.MDBPort = Integer.parseInt(MDBPort);
         this.MDRPort = Integer.parseInt(MDRPort);
-        this.storageDirPath = "Peer" + "_" + this.ID;
-        this.backupDirPath = storageDirPath + "/Backup";
-        this.restoreDirPath = storageDirPath + "/Restore";
-        this.storagePathRecord = storageDirPath + "/record.ser";
-        this.storagePathChunks = storageDirPath + "/chunks.ser";
+        storageDirPath = "Peer" + "_" + ID;
+        backupDirPath = storageDirPath + "/Backup";
+        restoreDirPath = storageDirPath + "/Restore";
+        storagePathRecord = storageDirPath + "/record.ser";
+        storagePathChunks = storageDirPath + "/chunks.ser";
         final Path dirPath = Paths.get(storageDirPath);
         final Path pathRecord = Paths.get(storagePathRecord);
         final Path pathChunk = Paths.get(storagePathChunks);
 
-        this.storedRecord = new StoredRecord();
-        this.storedChunks = new StoredChunks();
+        storedRecord = new StoredRecord();
+        storedChunks = new StoredChunks();
         this.restoreRecord = new RestoreRecord();
         this.removeRecord = new RemoveRecord();
 
-        this.executor = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(250);
+        executor = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(250);
         this.putChunkSent = true;
 
         // Check if storage file already exists
@@ -125,6 +110,98 @@ public class Peer implements RemoteInterface {
         this.multicastManager = new MulticastManager(this);
     }
 
+    public static void main(String[] args) {
+        if (args.length != 9) {
+            System.err.println("[Wrong number of arguments]");
+            System.exit(-1);
+        }
+
+        String peerProtVersion = args[0]; // Protocol Version
+        String peerID = args[1]; // Peer ID
+        String peerAccessPoint = args[2];
+        String MCName = args[3];
+        String MCPort = args[4];
+        String MDBName = args[5];
+        String MDBPort = args[6];
+        String MDRName = args[7];
+        String MDRPort = args[8];
+
+        try {
+            Peer obj = new Peer(peerProtVersion, peerID, peerAccessPoint, MCName, MCPort, MDBName, MDBPort, MDRName,
+                    MDRPort);
+            RemoteInterface stub = (RemoteInterface) UnicastRemoteObject.exportObject(obj, 0);
+            // Bind the remote object's stub in the registry
+            Registry registry = LocateRegistry.getRegistry();
+            registry.rebind(peerAccessPoint, stub);
+            System.err.println("Peer ready");
+        } catch (Exception e) {
+            System.err.println("Peer exception: " + e.toString());
+            e.printStackTrace();
+        }
+
+        // Saves the storage when the peer is interrupted
+        Runtime.getRuntime().addShutdownHook(new Thread(Peer::serialize));
+    }
+
+    public static void serialize() {
+        serializeChunks();
+        serializeRecord();
+    }
+
+    public static void serializeRecord() {
+        try {
+            FileOutputStream fileOutputStreamRecord = new FileOutputStream(storagePathRecord);
+            ObjectOutputStream objectOutputStreamRecord = new ObjectOutputStream(fileOutputStreamRecord);
+            objectOutputStreamRecord.writeObject(storedRecord);
+            objectOutputStreamRecord.close();
+            fileOutputStreamRecord.close();
+            System.out.println("Data was stored under " + storagePathRecord);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void deserializeRecord() {
+        try {
+            FileInputStream fileInputStreamRecord = new FileInputStream(storagePathRecord);
+            ObjectInputStream objectInputStreamRecord = new ObjectInputStream(fileInputStreamRecord);
+            storedRecord = (StoredRecord) objectInputStreamRecord.readObject();
+            objectInputStreamRecord.close();
+            fileInputStreamRecord.close();
+            storedRecord.print();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return;
+        }
+    }
+
+    public static void serializeChunks() {
+        try {
+            FileOutputStream fileOutputStreamChunks = new FileOutputStream(storagePathChunks);
+            ObjectOutputStream objectOutputStreamChunks = new ObjectOutputStream(fileOutputStreamChunks);
+            objectOutputStreamChunks.writeObject(storedChunks);
+            objectOutputStreamChunks.close();
+            fileOutputStreamChunks.close();
+            System.out.println("Data was stored under " + storagePathChunks);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void deserializeChunks() {
+        try {
+            FileInputStream fileInputStreamChunks = new FileInputStream(storagePathChunks);
+            ObjectInputStream objectInputStreamChunks = new ObjectInputStream(fileInputStreamChunks);
+            storedChunks = (StoredChunks) objectInputStreamChunks.readObject();
+            objectInputStreamChunks.close();
+            fileInputStreamChunks.close();
+            storedChunks.print();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return;
+        }
+    }
+
     public MulticastSocket getMCSocket() {
         return this.MCSocket;
     }
@@ -158,7 +235,7 @@ public class Peer implements RemoteInterface {
     }
 
     public String getID() {
-        return this.ID;
+        return ID;
     }
 
     public InetAddress getMCGroup() {
@@ -191,39 +268,6 @@ public class Peer implements RemoteInterface {
 
     private String getRestoreDirPath() {
         return restoreDirPath;
-    }
-
-    public static void main(String[] args) {
-        if (args.length != 9) {
-            System.err.println("[Wrong number of arguments]");
-            System.exit(-1);
-        }
-
-        String peerProtVersion = args[0]; // Protocol Version
-        String peerID = args[1]; // Peer ID
-        String peerAccessPoint = args[2];
-        String MCName = args[3];
-        String MCPort = args[4];
-        String MDBName = args[5];
-        String MDBPort = args[6];
-        String MDRName = args[7];
-        String MDRPort = args[8];
-
-        try {
-            Peer obj = new Peer(peerProtVersion, peerID, peerAccessPoint, MCName, MCPort, MDBName, MDBPort, MDRName,
-                    MDRPort);
-            RemoteInterface stub = (RemoteInterface) UnicastRemoteObject.exportObject(obj, 0);
-            // Bind the remote object's stub in the registry
-            Registry registry = LocateRegistry.getRegistry();
-            registry.rebind(peerAccessPoint, stub);
-            System.err.println("Peer ready");
-        } catch (Exception e) {
-            System.err.println("Peer exception: " + e.toString());
-            e.printStackTrace();
-        }
-
-        // Saves the storage when the peer is interrupted
-        Runtime.getRuntime().addShutdownHook(new Thread(Peer::serialize));
     }
 
     public void backup(String fileName, int replicationDegree) throws IOException, NoSuchAlgorithmException {
@@ -265,8 +309,7 @@ public class Peer implements RemoteInterface {
         }
     }
 
-    public void sendStopAndWait(Chunk chunk, int replicationDegree, String fileID, String chunkKey)
-            throws IOException, SocketException {
+    public void sendStopAndWait(Chunk chunk, int replicationDegree, String fileID, String chunkKey) throws IOException {
         String putChunkMessage = "";
         int timesSent = 0;
         byte[] putChunkBuf = new byte[BACKUP_BUFFER_SIZE], content = chunk.getData();
@@ -339,7 +382,7 @@ public class Peer implements RemoteInterface {
         String fileID = fileMetadata.getID();
 
         // <Version> DELETE <SenderId> <FileId> <CRLF><CRLF>
-        String deleteMessage = this.protocolVersion + " DELETE " + this.ID + " " + fileID + " " + CRLF + CRLF;
+        String deleteMessage = this.protocolVersion + " DELETE " + ID + " " + fileID + " " + CRLF + CRLF;
         byte[] deleteBuf = deleteMessage.getBytes();
 
         DatagramPacket deletePacket = new DatagramPacket(deleteBuf, deleteBuf.length, MCGroup, MCPort);
@@ -350,13 +393,13 @@ public class Peer implements RemoteInterface {
     public void reclaim(int availableStorage) throws IOException, NoSuchAlgorithmException {
         String reclaimMessage;
         String key;
-        this.storedChunks.setAvailableStorage(availableStorage);
+        storedChunks.setAvailableStorage(availableStorage);
 
         for (ChunkInfo chunkInfo : storedChunks.getChunks()) {
             this.putChunkSent = false;
             key = makeKey(Integer.toString(chunkInfo.getID()), chunkInfo.getFileID());
             // <Version> REMOVED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
-            reclaimMessage = this.protocolVersion + " REMOVED " + this.ID + " " + chunkInfo.getFileID() + " "
+            reclaimMessage = this.protocolVersion + " REMOVED " + ID + " " + chunkInfo.getFileID() + " "
                     + chunkInfo.getID() + " " + CRLF + CRLF;
 
             try {
@@ -382,9 +425,9 @@ public class Peer implements RemoteInterface {
             if (backupDirectory.length == 0)
                 backupDir.delete();
 
-            this.storedChunks.remove(key);
+            storedChunks.remove(key);
 
-            if (this.storedChunks.getOccupiedStorage() <= this.storedChunks.getAvailableStorage())
+            if (storedChunks.getOccupiedStorage() <= storedChunks.getAvailableStorage())
                 break;
         }
     }
@@ -426,8 +469,8 @@ public class Peer implements RemoteInterface {
             }
 
             // <Version> GETCHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
-            String getChunkMessage = this.protocolVersion + " GETCHUNK " + this.ID + " " + fileID + " " + chunk.getID()
-                    + " " + CRLF + CRLF;
+            String getChunkMessage = this.protocolVersion + " GETCHUNK " + ID + " " + fileID + " " + chunk.getID() + " "
+                    + CRLF + CRLF;
             byte[] getChunkBuf = getChunkMessage.getBytes();
 
             DatagramPacket getChunkPacket = new DatagramPacket(getChunkBuf, getChunkBuf.length, MCGroup, MCPort);
@@ -450,7 +493,7 @@ public class Peer implements RemoteInterface {
     public void assembleFile(String fileName) {
         try {
             // Store chunk
-            final Path restoreDirPath = Paths.get(this.restoreDirPath);
+            final Path restoreDirPath = Paths.get(Peer.restoreDirPath);
 
             if (Files.notExists(restoreDirPath)) {
                 Files.createDirectories(restoreDirPath);
@@ -467,65 +510,6 @@ public class Peer implements RemoteInterface {
             outputStream.close();
         } catch (Exception e) {
             e.printStackTrace();
-        }
-    }
-
-    public static void serialize() {
-        serializeChunks();
-        serializeRecord();
-    }
-
-    public static void serializeRecord() {
-        try {
-            FileOutputStream fileOutputStreamRecord = new FileOutputStream(storagePathRecord);
-            ObjectOutputStream objectOutputStreamRecord = new ObjectOutputStream(fileOutputStreamRecord);
-            objectOutputStreamRecord.writeObject(storedRecord);
-            objectOutputStreamRecord.close();
-            fileOutputStreamRecord.close();
-            System.out.println("Data was stored under " + storagePathRecord);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    public static void deserializeRecord() {
-        try {
-            FileInputStream fileInputStreamRecord = new FileInputStream(storagePathRecord);
-            ObjectInputStream objectInputStreamRecord = new ObjectInputStream(fileInputStreamRecord);
-            storedRecord = (StoredRecord) objectInputStreamRecord.readObject();
-            objectInputStreamRecord.close();
-            fileInputStreamRecord.close();
-            storedRecord.print();
-        } catch (Exception e) {
-            e.printStackTrace();
-            return;
-        }
-    }
-
-    public static void serializeChunks() {
-        try {
-            FileOutputStream fileOutputStreamChunks = new FileOutputStream(storagePathChunks);
-            ObjectOutputStream objectOutputStreamChunks = new ObjectOutputStream(fileOutputStreamChunks);
-            objectOutputStreamChunks.writeObject(storedChunks);
-            objectOutputStreamChunks.close();
-            fileOutputStreamChunks.close();
-            System.out.println("Data was stored under " + storagePathChunks);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    public static void deserializeChunks() {
-        try {
-            FileInputStream fileInputStreamChunks = new FileInputStream(storagePathChunks);
-            ObjectInputStream objectInputStreamChunks = new ObjectInputStream(fileInputStreamChunks);
-            storedChunks = (StoredChunks) objectInputStreamChunks.readObject();
-            objectInputStreamChunks.close();
-            fileInputStreamChunks.close();
-            storedChunks.print();
-        } catch (Exception e) {
-            e.printStackTrace();
-            return;
         }
     }
 }

@@ -1,6 +1,5 @@
 import java.io.FileNotFoundException;
 import java.io.IOException;
-
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.security.NoSuchAlgorithmException;
@@ -8,7 +7,7 @@ import java.security.NoSuchAlgorithmException;
 public class TestClient {
     private String peerAccessAPoint;
 
-    public TestClient(String[] args) throws FileNotFoundException, IOException {
+    public TestClient(String[] args) throws IOException {
         this.peerAccessAPoint = args[0];
 
         try {
@@ -22,7 +21,7 @@ public class TestClient {
     }
 
     private void parseArgs(String[] args, RemoteInterface remote)
-            throws FileNotFoundException, IOException, NoSuchAlgorithmException {
+            throws IOException, NoSuchAlgorithmException {
         String peerAP = args[0];
         String subProtocol = args[1];
         String opnd1 = "", opnd2 = "";

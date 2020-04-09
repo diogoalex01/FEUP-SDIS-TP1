@@ -1,12 +1,9 @@
 import java.util.Set;
-import java.util.HashSet;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.TreeSet;
-
 
 public class RemoveRecord {
     Set<String> record; // Record of the removed chunks
-    ConcurrentHashMap<String,Integer> removedMap =new ConcurrentHashMap<>();
+    ConcurrentHashMap<String, Integer> removedMap = new ConcurrentHashMap<>();
 
     public RemoveRecord() {
         record = removedMap.newKeySet();

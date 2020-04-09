@@ -1,25 +1,15 @@
-import java.util.concurrent.Executors;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-
 import java.net.DatagramPacket;
-import java.net.InetAddress;
-import java.net.SocketException;
-import java.net.UnknownHostException;
-import java.net.MulticastSocket;
-import java.security.NoSuchAlgorithmException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MulticastManager {
-    Peer peer;
     private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
     private static ExecutorService executor;
+    Peer peer;
 
     public MulticastManager(Peer peer) {
         this.peer = peer;
-        this.executor = (ExecutorService) Executors.newWorkStealingPool();
+        executor = Executors.newWorkStealingPool();
 
         Runnable readMC = () -> {
             byte[] buf = new byte[BACKUP_BUFFER_SIZE];
@@ -29,7 +19,7 @@ public class MulticastManager {
                 try {
                     this.peer.getMCSocket().receive(packet);
                     String received = new String(packet.getData(), 0, packet.getLength());
-                    this.executor.execute(new MCParser(this.peer, received));
+                    executor.execute(new MCParser(this.peer, received));
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -43,7 +33,7 @@ public class MulticastManager {
                         this.peer.getMDBPort());
                 try {
                     this.peer.getMDBSocket().receive(packet);
-                    this.executor.execute(new MDBParser(this.peer, packet));
+                    executor.execute(new MDBParser(this.peer, packet));
 
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -58,7 +48,7 @@ public class MulticastManager {
                         this.peer.getMDRPort());
                 try {
                     this.peer.getMDRSocket().receive(packet);
-                    this.executor.execute(new MDRParser(this.peer, packet));
+                    executor.execute(new MDRParser(this.peer, packet));
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
