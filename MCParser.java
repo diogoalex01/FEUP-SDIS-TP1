@@ -21,7 +21,7 @@ public class MCParser implements Runnable {
     public void parseMessageMC() {
         try {
             System.out.println("REC: " + received);
-            String[] receivedMessage = received.split("[\\u0020]+"); // blank space UTF-8
+            String[] receivedMessage = received.split("[\\u0020]+?"); // blank space UTF-8
             String protocolVersion = receivedMessage[0];
             String command = receivedMessage[1];
             String senderID = receivedMessage[2];
@@ -38,27 +38,34 @@ public class MCParser implements Runnable {
                 String key = this.peer.makeKey(chunkID, fileID);
 
                 if (this.peer.getStoredChunks().getChunkInfo(key) != null
-                        && this.peer.getStoredChunks().getChunkInfo(key).getActualReplicationDegree() < this.peer
-                        .getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree()) {
+                        && !this.peer.getStoredChunks().getChunkInfo(key).getHolders().contains(senderID)) {
                     this.peer.getStoredChunks().getChunkInfo(key).updateActualReplicationDegree(1);
-                    System.out.println("Updating storedChunks");
+                    this.peer.getStoredChunks().getChunkInfo(key).addHolders(senderID);
+                    System.out.println("Updating storedChunks +1");
                 }
 
-                // Each chunk updates the replication degree of the
-                // files that are being stored by some other peer
+                // Each chunk updates the replication degree of the files that
+                // are being stored by some other peer if the sender is distinct
                 if (this.peer.getStoredRecord().getChunkInfo(key) != null
-                        && this.peer.getStoredRecord().getChunkInfo(key).getActualReplicationDegree() < this.peer
-                        .getStoredRecord().getChunkInfo(key).getDesiredReplicationDegree()) {
+                        && !this.peer.getStoredRecord().getChunkInfo(key).getHolders().contains(senderID)) {
                     this.peer.getStoredRecord().getChunkInfo(key).updateActualReplicationDegree(1);
+                    this.peer.getStoredRecord().getChunkInfo(key).addHolders(senderID);
                     System.out.println("Updating storedRecord");
                 }
 
-                // if (this.peer.getStoredRecord().getChunkInfo(key) != null) {
-                //     System.out.println("STORED=> actual: "
-                //             + this.peer.getStoredRecord().getChunkInfo(key).getActualReplicationDegree());
-                //     System.out.println("STORED=> desired: "
-                //             + this.peer.getStoredRecord().getChunkInfo(key).getDesiredReplicationDegree());
-                // }
+                if (this.peer.getStoredRecord().getChunkInfo(key) != null) {
+                    System.out.println("STORED=> actual: "
+                            + this.peer.getStoredRecord().getChunkInfo(key).getActualReplicationDegree());
+                    System.out.println("STORED=> desired: "
+                            + this.peer.getStoredRecord().getChunkInfo(key).getDesiredReplicationDegree());
+                }
+
+                if (this.peer.getStoredChunks().getChunkInfo(key) != null) {
+                    System.out.println("CHUNK=> actual: "
+                            + this.peer.getStoredChunks().getChunkInfo(key).getActualReplicationDegree());
+                    System.out.println("CHUNK=> desired: "
+                            + this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree());
+                }
             }
             // <Version> DELETE <SenderId> <FileId> <CRLF><CRLF>
             else if (command.equals("DELETE")) {
@@ -129,6 +136,7 @@ public class MCParser implements Runnable {
                 // the removed chunk that it is storing
                 if (this.peer.getStoredChunks().getChunkInfo(key) != null) {
                     this.peer.getStoredChunks().getChunkInfo(key).updateActualReplicationDegree(-1);
+                    this.peer.getStoredChunks().getChunkInfo(key).removeHolders(senderID);
 
                     if (file.exists()) {
                         System.out.println("Folder exists");
@@ -144,12 +152,14 @@ public class MCParser implements Runnable {
 
                             if (this.peer.getRemoveRecord().wasRemoved(key)) {
                                 System.out.println("No one sent... Sending...");
-                                Chunk chunk = new Chunk(Integer.parseInt(chunkID), fileID, chunkBody.length, 0);
+                                Chunk chunk = new Chunk(Integer.parseInt(chunkID), fileID, chunkBody.length, this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree(),
+                                        "UNKNOWN");
                                 chunk.setData(chunkBody);
                                 chunk.setActualReplicationDegree(
                                         this.peer.getStoredChunks().getChunkInfo(key).getActualReplicationDegree());
-                                chunk.setDesiredReplicationDegree(
-                                        this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree());
+                                // chunk.setDesiredReplicationDegree(
+                                //         this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree());
+                                System.out.println("A repor o chunk com ARD: "+ chunk.getActualReplicationDegree()+" e RD: "+ chunk.getDesiredReplicationDegree());
                                 this.peer.sendStopAndWait(chunk, chunk.getDesiredReplicationDegree(), fileID, key);
                             } else {
                                 System.out.println("Someone else already sent!");
@@ -162,6 +172,7 @@ public class MCParser implements Runnable {
                 // files that are being stored by some other peer
                 if (this.peer.getStoredRecord().getChunkInfo(key) != null) {
                     this.peer.getStoredRecord().getChunkInfo(key).updateActualReplicationDegree(-1);
+                    this.peer.getStoredRecord().getChunkInfo(key).removeHolders(senderID);
                     System.out.println("Updating storedRecord");
                 }
             }

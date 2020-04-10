@@ -12,6 +12,7 @@ import java.rmi.server.UnicastRemoteObject;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.text.DecimalFormat;
 
 // java Peer 1.0 1 AP1 230.0.0.0 4445 231.0.0.0 4446 232.0.0.0 4447
 
@@ -45,7 +46,6 @@ public class Peer implements RemoteInterface {
     private volatile int restoredChunks = 0;
     private RemoveRecord removeRecord;
     private MulticastManager multicastManager;
-    private boolean putChunkSent;
 
     public Peer(String peerProtocolVersion, String peerID, String peerAccessPoint, String MCName, String MCPort,
             String MDBName, String MDBPort, String MDRName, String MDRPort) throws IOException {
@@ -73,7 +73,6 @@ public class Peer implements RemoteInterface {
         this.removeRecord = new RemoveRecord();
 
         executor = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(250);
-        this.putChunkSent = true;
 
         // Check if storage file already exists
         try {
@@ -132,7 +131,7 @@ public class Peer implements RemoteInterface {
             RemoteInterface stub = (RemoteInterface) UnicastRemoteObject.exportObject(obj, 0);
             // Bind the remote object's stub in the registry
             Registry registry = LocateRegistry.getRegistry();
-            registry.rebind(peerAccessPoint, stub);
+            registry.bind(peerAccessPoint, stub);
             System.err.println("Peer ready");
         } catch (Exception e) {
             System.err.println("Peer exception: " + e.toString());
@@ -168,7 +167,6 @@ public class Peer implements RemoteInterface {
             storedRecord = (StoredRecord) objectInputStreamRecord.readObject();
             objectInputStreamRecord.close();
             fileInputStreamRecord.close();
-            storedRecord.print();
         } catch (Exception e) {
             e.printStackTrace();
             return;
@@ -195,7 +193,6 @@ public class Peer implements RemoteInterface {
             storedChunks = (StoredChunks) objectInputStreamChunks.readObject();
             objectInputStreamChunks.close();
             fileInputStreamChunks.close();
-            storedChunks.print();
         } catch (Exception e) {
             e.printStackTrace();
             return;
@@ -284,6 +281,7 @@ public class Peer implements RemoteInterface {
             byte[] body = Files.readAllBytes(file.toPath());
             FileMetadata fileMetadata = new FileMetadata(file, replicationDegree);
             String fileID = fileMetadata.getID();
+            storedRecord.insertFileName(fileID, fileName);
 
             fileMetadata.makeChunks();
             System.out.println("Made " + fileMetadata.getChunks().size() + " chunks");
@@ -357,10 +355,6 @@ public class Peer implements RemoteInterface {
         System.out.println("Backed up chunk " + chunk.getID());
     }
 
-    public String makeKey(String chunkID, String fileID) {
-        return chunkID + "_" + fileID;
-    }
-
     public void delete(String fileName) throws IOException, NoSuchAlgorithmException {
         try {
             final Path path = Paths.get(fileName);
@@ -396,7 +390,10 @@ public class Peer implements RemoteInterface {
         storedChunks.setAvailableStorage(availableStorage);
 
         for (ChunkInfo chunkInfo : storedChunks.getChunks()) {
-            this.putChunkSent = false;
+
+            if (storedChunks.getOccupiedStorage() <= storedChunks.getAvailableStorage())
+                break;
+
             key = makeKey(Integer.toString(chunkInfo.getID()), chunkInfo.getFileID());
             // <Version> REMOVED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
             reclaimMessage = this.protocolVersion + " REMOVED " + ID + " " + chunkInfo.getFileID() + " "
@@ -427,8 +424,6 @@ public class Peer implements RemoteInterface {
 
             storedChunks.remove(key);
 
-            if (storedChunks.getOccupiedStorage() <= storedChunks.getAvailableStorage())
-                break;
         }
     }
 
@@ -488,6 +483,27 @@ public class Peer implements RemoteInterface {
         System.out.println(restoreRecord.getRestoredChunks().size() + " chunks restored! Proceeding...");
         assembleFile(fileName);
         restoreRecord.printChunks();
+    }
+
+    public String state() {
+        String state = "Peer ID: " + ID;
+        state += "\n Backups: \n";
+        state += storedRecord.print();
+        state += "\n Stored File Chunks: \n";
+        state += storedChunks.print();
+        state += "\nMaximum Storage Capacity: " + storedChunks.getAvailableStorage() + " Bytes";
+        DecimalFormat decimalFormat = new DecimalFormat("###.## %");
+        double ratio = storedChunks.getAvailableStorage() != 0
+                ? (double) storedChunks.getOccupiedStorage() / storedChunks.getAvailableStorage()
+                : 0;
+        state += "\nOccupied Storage: " + storedChunks.getOccupiedStorage() + " Bytes ( " + decimalFormat.format(ratio)
+                + " )";
+
+        return state;
+    }
+
+    public String makeKey(String chunkID, String fileID) {
+        return chunkID + "_" + fileID;
     }
 
     public void assembleFile(String fileName) {

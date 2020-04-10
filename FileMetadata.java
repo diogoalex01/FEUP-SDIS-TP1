@@ -14,6 +14,7 @@ public class FileMetadata {
     private File file;
     private int replicationDegree;
     private ArrayList<Chunk> chunks;
+    private String fileName;
 
     public FileMetadata(File file, int replicationDegree) throws NoSuchAlgorithmException, IOException {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -23,6 +24,7 @@ public class FileMetadata {
         this.file = file;
         this.setReplicationDegree(replicationDegree);
         this.chunks = new ArrayList<>();
+        this.fileName = file.getName();
     }
 
     public static String toHexString(byte[] hash) {
@@ -64,13 +66,13 @@ public class FileMetadata {
         int lastIndex = 0;
 
         for (; chunkCounter < chunkNumber; chunkCounter++) {
-            Chunk chunk = new Chunk(chunkCounter, this.ID, MAX_CHUNK_SIZE, replicationDegree);
+            Chunk chunk = new Chunk(chunkCounter, this.ID, MAX_CHUNK_SIZE, replicationDegree, fileName);
             chunk.setData(Arrays.copyOfRange(body, lastIndex, lastIndex + MAX_CHUNK_SIZE));
             lastIndex += MAX_CHUNK_SIZE;
             chunks.add(chunk);
         }
 
-        Chunk chunk = new Chunk(chunkCounter, this.ID, remainder, replicationDegree);
+        Chunk chunk = new Chunk(chunkCounter, this.ID, remainder, replicationDegree, fileName);
         chunk.setData(Arrays.copyOfRange(body, lastIndex, lastIndex + remainder));
         chunks.add(chunk);
     }

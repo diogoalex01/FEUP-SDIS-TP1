@@ -1,4 +1,6 @@
 import java.io.Serializable;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ChunkInfo implements Serializable, Comparable<ChunkInfo> {
     private int ID;
@@ -6,13 +8,18 @@ public class ChunkInfo implements Serializable, Comparable<ChunkInfo> {
     private int size;
     private int desiredReplicationDegree;
     private int actualReplicationDegree;
+    private String fileName;
+    Set<String> holders;
+    ConcurrentHashMap<String, Integer> holdersMap = new ConcurrentHashMap<>();
 
-    public ChunkInfo(int ID, String fileID, int size, int replicationDegree) {
+    public ChunkInfo(int ID, String fileID, int size, int replicationDegree, String fileName) {
         this.ID = ID;
         this.fileID = fileID;
         this.size = size;
         this.desiredReplicationDegree = replicationDegree;
         this.actualReplicationDegree = 0;
+        this.fileName = fileName;
+        holders = holdersMap.newKeySet();
     }
 
     ChunkInfo(ChunkInfo chunkInfo) {
@@ -21,6 +28,8 @@ public class ChunkInfo implements Serializable, Comparable<ChunkInfo> {
         this.size = chunkInfo.getSize();
         this.desiredReplicationDegree = chunkInfo.getDesiredReplicationDegree();
         this.actualReplicationDegree = chunkInfo.getActualReplicationDegree();
+        this.fileName = chunkInfo.getFileName();
+        holders = chunkInfo.getHolders();
     }
 
     public String getFileID() {
@@ -63,8 +72,24 @@ public class ChunkInfo implements Serializable, Comparable<ChunkInfo> {
         this.actualReplicationDegree += actualReplicationDegree;
     }
 
+    public String getFileName() {
+        return fileName;
+    }
+
     public void updateActualReplicationDegree(int actualReplicationDegree) {
         this.actualReplicationDegree += actualReplicationDegree;
+    }
+
+    public Set<String> getHolders() {
+        return holders;
+    }
+
+    public void addHolders(String holder) {
+        holders.add(holder);
+    }
+
+    public void removeHolders(String holder) {
+        holders.remove(holder);
     }
 
     @Override

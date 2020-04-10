@@ -56,14 +56,22 @@ public class StoredChunks implements Serializable {
     public void removeFileChunks(String fileID) {
         Set<String> set = storedChunks.keySet().stream().filter(string -> string.endsWith("_" + fileID))
                 .collect(Collectors.toSet());
+        for (String chunkID : set) {
+            occupiedStorage -= storedChunks.get(chunkID).getSize();
+        }
         storedChunks.keySet().removeAll(set);
     }
 
-    public void print() {
-        // Print values
-        System.out.println("In storage:");
-        for (ChunkInfo chunkInfo : storedChunks.values()) {
-            System.out.println(chunkInfo.getFileID() + "_" + chunkInfo.getID());
+    public String print() {
+        String state = "";
+
+        for (ChunkInfo chunk : storedChunks.values()) {
+            state += "\n\tChunk ID: " + chunk.getFileID() + "_" + chunk.getID();
+            state += "\n\tSize: " + chunk.getSize() + " Bytes";
+            state += "\n\tActual Replication Degree: " + chunk.getActualReplicationDegree();
         }
+
+        state += "\n";
+        return state;
     }
 }

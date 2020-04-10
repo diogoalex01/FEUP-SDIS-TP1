@@ -1,4 +1,5 @@
 import java.net.DatagramPacket;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Random;
 
@@ -19,13 +20,13 @@ public class MDRParser implements Runnable {
     public void parseMessageMDR() {
         try {
             // <Version> CHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF><Body>
-            String received = new String(packet.getData(), 0, packet.getLength());
+            String received = new String(this.packet.getData(), 0, this.packet.getLength(), StandardCharsets.UTF_8);
             Random rand = new Random();
-            String[] receivedMessage = received.split("[\\u0020]+", 7); // blank space UTF-8
+            String[] receivedMessage;
+            String chunkBody = "";
 
-            int bodyStartIndex = received.lastIndexOf(CRLF) + CRLF.length();
-            byte[] chunkBody = new byte[packet.getLength() - bodyStartIndex];
-            chunkBody = Arrays.copyOfRange(packet.getData(), bodyStartIndex, packet.getLength());
+            receivedMessage = received.split("[\\u0020]+", 6); // blank space UTF-8
+            chunkBody = receivedMessage[5].substring(2 * CRLF.length());
 
             String protocolVersion = receivedMessage[0];
             String command = receivedMessage[1];
@@ -51,8 +52,8 @@ public class MDRParser implements Runnable {
                 } else {
                     if (!this.peer.getRestoreRecord().isRestored(key)) {
                         this.peer.getRestoreRecord().insertKey(key);
-                        Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, chunkBody.length, 0);
-                        chunk.setData(chunkBody);
+                        Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, chunkBody.length(), 0, "UNKNOWN");
+                        chunk.setData(chunkBody.getBytes(StandardCharsets.UTF_8));
                         this.peer.getRestoreRecord().insertChunk(chunk);
                     }
                 }

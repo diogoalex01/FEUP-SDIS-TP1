@@ -13,4 +13,6 @@ public interface RemoteInterface extends Remote {
     void delete(String filepath) throws IOException, NoSuchAlgorithmException;
 
     void reclaim(int availableStorage) throws IOException, NoSuchAlgorithmException;
+
+    String state() throws IOException;
 }

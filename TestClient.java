@@ -52,6 +52,9 @@ public class TestClient {
                 break;
             }
             case "STATE": {
+                String state;
+                state = remote.state();
+                System.out.println(state);
                 break;
             }
         }
