@@ -41,8 +41,8 @@ public class MDRParser implements Runnable {
 
             if (command.equals("CHUNK")) {
                 System.out.println("CHUNK");
-
                 // Checks if the chunk belongs to a local file
+                // True if peer is not original file owner.
                 if (this.peer.getStoredRecord().getChunkInfo(key) == null) {
                     // Only stores a new key if the chunk wasn't
                     // already restored by any of the other peers
@@ -50,15 +50,36 @@ public class MDRParser implements Runnable {
                         this.peer.getRestoreRecord().insertKey(key);
                     }
                 } else {
+                    // Original file owner, stores new chunks to assemble file
                     if (!this.peer.getRestoreRecord().isRestored(key)) {
                         this.peer.getRestoreRecord().insertKey(key);
-                        Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, chunkBody.length(), 0, "UNKNOWN");
+                        Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, chunkBody.length(), 0,
+                                "UNKNOWN");
                         chunk.setData(chunkBody.getBytes(StandardCharsets.UTF_8));
                         this.peer.getRestoreRecord().insertChunk(chunk);
                     }
                 }
+            }
+            // <Version> CONNECT <SenderID> <FileID> <ChunkNo> <hostName> <port>
+            // <CRLF><CRLF>
+            else if (command.equals("CONNECT")) {
+                receivedMessage = received.split("[\\u0020]+", 8); // blank space UTF-8
+                String hostname = receivedMessage[5];
+                String port = receivedMessage[6];
+
+                // Checks if the chunk belongs to a local file
+                // True if peer is not original file owner.
+                if (this.peer.getStoredRecord().getChunkInfo(key) == null) {
+                    // Only stores a new key if the chunk wasn't
+                    // already restored by any of the other peers
+                    if (!this.peer.getRestoreRecord().isRestored(key)) {
+                        this.peer.getRestoreRecord().insertKey(key);
+                    }
+                } else {
+                    this.peer.receiveOverTCP(hostname, port, chunkNumber, fileID);
+                }
             } else {
-                System.out.println("CHUNK command not found!");
+                System.out.println("Valid command not found!");
             }
         } catch (Exception e) {
             e.printStackTrace();

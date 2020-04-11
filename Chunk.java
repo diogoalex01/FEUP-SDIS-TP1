@@ -12,4 +12,26 @@ public class Chunk extends ChunkInfo {
     public void setData(byte[] data) {
         this.data = data;
     }
+
+    @Override
+    public boolean equals(Object objectInfo) {
+        if (this == objectInfo)
+            return true;
+
+        if (objectInfo == null || objectInfo.getClass() != this.getClass())
+            return false;
+
+        Chunk chunk = (Chunk) objectInfo;
+
+        return (super.getID() == chunk.getID() && super.getFileID().equals(chunk.getFileID())
+                && super.getSize() == chunk.getSize()
+                && super.getDesiredReplicationDegree() == chunk.getDesiredReplicationDegree()
+                && super.getActualReplicationDegree() == chunk.getActualReplicationDegree()
+                && super.getFileName().equals(chunk.getFileName()));
+    }
+
+    @Override
+    public int hashCode() {
+        return super.getID();
+    }
 }

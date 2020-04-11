@@ -1,18 +1,28 @@
 import java.io.*;
+import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+
 import java.net.DatagramPacket;
 import java.net.InetAddress;
 import java.net.MulticastSocket;
 import java.net.SocketException;
+import java.net.ServerSocket;
+import java.net.Socket;
+
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.security.NoSuchAlgorithmException;
+import java.security.cert.CRL;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.Arrays;
+import java.util.Random;
 import java.text.DecimalFormat;
+import static java.lang.Math.toIntExact;
 
 // java Peer 1.0 1 AP1 230.0.0.0 4445 231.0.0.0 4446 232.0.0.0 4447
 
@@ -72,7 +82,7 @@ public class Peer implements RemoteInterface {
         this.restoreRecord = new RestoreRecord();
         this.removeRecord = new RemoveRecord();
 
-        executor = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(250);
+        executor = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(100);
 
         // Check if storage file already exists
         try {
@@ -311,7 +321,8 @@ public class Peer implements RemoteInterface {
         String putChunkMessage = "";
         int timesSent = 0;
         byte[] putChunkBuf = new byte[BACKUP_BUFFER_SIZE], content = chunk.getData();
-        long limitTime = INITIAL_WAITING_TIME, startTime, elapsedTime;
+        long limitTime = INITIAL_WAITING_TIME;
+        int nSleeps = 0;
 
         // Terminates after 5 unsuccessful attempts (2^n seconds) or when
         // the ammount of stores meets the desired replication degree
@@ -330,20 +341,16 @@ public class Peer implements RemoteInterface {
             System.out.println("Sending chunk");
 
             timesSent++;
-            startTime = System.currentTimeMillis();
 
-            // Loops while the ammount of stores doesn't meet the desired replication degree
-            while (storedRecord.getChunkInfo(chunkKey) != null
-                    // Prevents peers sending PUTCHUNK caused by SPACE
-                    // RECLAIMING from being registered as the file owner
-                    ? storedRecord.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()
-                    : storedChunks.getReplicationDegree(chunkKey) < chunk.getDesiredReplicationDegree()) {
-                elapsedTime = System.currentTimeMillis();
-                if (elapsedTime - startTime > limitTime) {
-                    limitTime *= 2;
-                    break;
-                }
+            // Awaits for STORED messages
+            try {
+                Thread.sleep(limitTime);
+                limitTime *= 2;
+            } catch (Exception e) {
+                System.err.println("Thread sending PUTCHUNK messages was interrupted.");
+                e.printStackTrace();
             }
+
             // System.out.println("Actual: " + storedRecord.getReplicationDegree(chunkKey));
             // System.out.println("Desired: " + chunk.getDesiredReplicationDegree());
         } while ((storedRecord.getChunkInfo(chunkKey) != null
@@ -483,6 +490,7 @@ public class Peer implements RemoteInterface {
         System.out.println(restoreRecord.getRestoredChunks().size() + " chunks restored! Proceeding...");
         assembleFile(fileName);
         restoreRecord.printChunks();
+        this.restoreRecord.clear();
     }
 
     public String state() {
@@ -519,6 +527,7 @@ public class Peer implements RemoteInterface {
             for (Chunk chunk : restoreRecord.getRestoredChunks()) {
                 byteArrayOutputStream.write(chunk.getData());
             }
+
             byte[] allChunks = byteArrayOutputStream.toByteArray();
 
             OutputStream outputStream = new FileOutputStream(restoreDirPath + "/" + fileName);
@@ -526,6 +535,66 @@ public class Peer implements RemoteInterface {
             outputStream.close();
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    public void sendOverTCP(String receiverID, String protocolVersion, String chunkID, String fileID, byte[] chunkBody)
+            throws IOException {
+        Random rand = new Random();
+        int randomFactor = rand.nextInt(2 * RANDOM_TIME);
+        // avoids port collision
+        int portNumber = (Integer.parseInt(ID) + toIntExact(Thread.currentThread().getId()) + Integer.parseInt(chunkID)
+                + randomFactor) % 65535;
+        System.out.println("PORT => " + portNumber);
+        String hostName = "127.0.0.1"; // localhost
+        String connectMessage = "";
+
+        // <Version> CONNECT <SenderID> <FileID> <ChunkNo> <hostName>
+        // <port> <CRLF><CRLF>
+        connectMessage += protocolVersion + " CONNECT " + ID + " " + fileID + " " + chunkID + " " + hostName + " "
+                + portNumber + " " + CRLF + CRLF;
+        byte[] connectBuf = connectMessage.getBytes();
+        DatagramPacket connectPacket = new DatagramPacket(connectBuf, connectBuf.length, MDRGroup, MDRPort);
+
+        MDRSocket.send(connectPacket);
+
+        try (ServerSocket serverSocket = new ServerSocket(portNumber);
+                Socket clientSocket = serverSocket.accept();
+                PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);) {
+            // System.out.println("Accepted TCP connection");
+            out.println(new String(chunkBody, 0, chunkBody.length, StandardCharsets.UTF_8));
+            System.out.println("Sent " + chunkBody.length + " bytes");
+        } catch (Exception e) {
+            e.printStackTrace();
+            return;
+        }
+    }
+
+    public void receiveOverTCP(String hostName, String port, String chunkNumber, String fileID) {
+        int portNumber = Integer.parseInt(port);
+        String fromServer;
+        char[] bodyRead = new char[BACKUP_BUFFER_SIZE];
+        String chunkKey = makeKey(chunkNumber, fileID);
+        int bytesRead = 0;
+
+        if (!getRestoreRecord().isRestored(chunkKey)) {
+            getRestoreRecord().insertKey(chunkKey);
+
+            try (Socket restoreSocket = new Socket(hostName, portNumber);
+                    BufferedReader in = new BufferedReader(new InputStreamReader(restoreSocket.getInputStream()));) {
+                System.out.println("Receiving over TCP");
+                bytesRead = in.read(bodyRead);
+                in.close();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
+            System.out.println("size: " + (bytesRead - CRLF.length()));
+            byte[] chunkBody = Arrays.copyOfRange(new String(bodyRead).getBytes(StandardCharsets.UTF_8), 0,
+                    bytesRead - CRLF.length());
+            Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, bytesRead - CRLF.length(), 0, "UNKNOWN");
+            chunk.setData(chunkBody);
+            getRestoreRecord().insertChunk(chunk);
         }
     }
 }

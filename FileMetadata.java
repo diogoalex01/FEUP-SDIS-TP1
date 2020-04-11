@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 
 public class FileMetadata {
-    private static final int MAX_CHUNK_SIZE = 64000;
+    private static final int MAX_CHUNK_SIZE = 17;
     private String ID;
     private File file;
     private int replicationDegree;

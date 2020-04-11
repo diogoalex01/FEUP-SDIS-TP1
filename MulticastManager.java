@@ -1,15 +1,16 @@
 import java.net.DatagramPacket;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 public class MulticastManager {
     private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
-    private static ExecutorService executor;
+    private static ScheduledThreadPoolExecutor executor;
     Peer peer;
 
     public MulticastManager(Peer peer) {
         this.peer = peer;
-        executor = Executors.newWorkStealingPool();
+        executor = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(100);
 
         Runnable readMC = () -> {
             byte[] buf = new byte[BACKUP_BUFFER_SIZE];

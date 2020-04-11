@@ -34,6 +34,11 @@ public class RestoreRecord {
         return restoredChunks;
     }
 
+    public void clear() {
+        record.clear();
+        restoredChunks.clear();
+    }
+
     public void print() {
         // Print values
         for (String string : record) {
