@@ -141,7 +141,7 @@ public class Peer implements RemoteInterface {
             RemoteInterface stub = (RemoteInterface) UnicastRemoteObject.exportObject(obj, 0);
             // Bind the remote object's stub in the registry
             Registry registry = LocateRegistry.getRegistry();
-            registry.bind(peerAccessPoint, stub);
+            registry.rebind(peerAccessPoint, stub);
             System.err.println("Peer ready");
         } catch (Exception e) {
             System.err.println("Peer exception: " + e.toString());
@@ -229,7 +229,7 @@ public class Peer implements RemoteInterface {
         return storedRecord;
     }
 
-    public RestoreRecord getRestoreRecord() {
+    public synchronized RestoreRecord getRestoreRecord() {
         return restoreRecord;
     }
 
@@ -483,29 +483,35 @@ public class Peer implements RemoteInterface {
 
         while (true) {
             restoredChunks = restoreRecord.getRestoredChunks().size();
-            if (restoredChunks == numberChunks)
+            if (restoredChunks == numberChunks) {
                 break;
+            }
         }
 
         System.out.println(restoreRecord.getRestoredChunks().size() + " chunks restored! Proceeding...");
         assembleFile(fileName);
+        System.out.println("Assembling...\nNumber of chunks: " + restoreRecord.getRestoredChunks().size());
+        System.out.println("Number of entries: " + restoreRecord.getRestoredSet().size());
         restoreRecord.printChunks();
         this.restoreRecord.clear();
+        System.out.println("Clearing...\nNumber of chunks: " + restoreRecord.getRestoredChunks().size());
+        System.out.println("Number of entries: " + restoreRecord.getRestoredSet().size());
+        restoreRecord.print();
     }
 
     public String state() {
-        String state = "Peer ID: " + ID;
+        String state = "\nPeer ID: " + ID;
         state += "\n Backups: \n";
         state += storedRecord.print();
         state += "\n Stored File Chunks: \n";
         state += storedChunks.print();
         state += "\nMaximum Storage Capacity: " + storedChunks.getAvailableStorage() + " Bytes";
-        DecimalFormat decimalFormat = new DecimalFormat("###.## %");
+        DecimalFormat decimalFormat = new DecimalFormat("###.##%");
         double ratio = storedChunks.getAvailableStorage() != 0
                 ? (double) storedChunks.getOccupiedStorage() / storedChunks.getAvailableStorage()
                 : 0;
         state += "\nOccupied Storage: " + storedChunks.getOccupiedStorage() + " Bytes ( " + decimalFormat.format(ratio)
-                + " )";
+                + " )\n";
 
         return state;
     }
@@ -525,6 +531,7 @@ public class Peer implements RemoteInterface {
 
             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
             for (Chunk chunk : restoreRecord.getRestoredChunks()) {
+                System.out.println("Copying form chunk "+ chunk.getID());
                 byteArrayOutputStream.write(chunk.getData());
             }
 
@@ -543,8 +550,10 @@ public class Peer implements RemoteInterface {
         Random rand = new Random();
         int randomFactor = rand.nextInt(2 * RANDOM_TIME);
         // avoids port collision
-        int portNumber = (Integer.parseInt(ID) + toIntExact(Thread.currentThread().getId()) + Integer.parseInt(chunkID)
-                + randomFactor) % 65535;
+        // int portNumber = (Integer.parseInt(ID) +
+        // toIntExact(Thread.currentThread().getId()) + Integer.parseInt(chunkID)
+        // + randomFactor) % 65535;
+        int portNumber = (Integer.parseInt(chunkID) + randomFactor) % 65535;
         System.out.println("PORT => " + portNumber);
         String hostName = "127.0.0.1"; // localhost
         String connectMessage = "";
@@ -555,9 +564,9 @@ public class Peer implements RemoteInterface {
                 + portNumber + " " + CRLF + CRLF;
         byte[] connectBuf = connectMessage.getBytes();
         DatagramPacket connectPacket = new DatagramPacket(connectBuf, connectBuf.length, MDRGroup, MDRPort);
-
-        MDRSocket.send(connectPacket);
-
+        MulticastSocket chunkSocket = MDRSocket;
+        
+        chunkSocket.send(connectPacket);
         try (ServerSocket serverSocket = new ServerSocket(portNumber);
                 Socket clientSocket = serverSocket.accept();
                 PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);) {
@@ -589,10 +598,12 @@ public class Peer implements RemoteInterface {
                 e.printStackTrace();
             }
 
-            System.out.println("size: " + (bytesRead - CRLF.length()));
-            byte[] chunkBody = Arrays.copyOfRange(new String(bodyRead).getBytes(StandardCharsets.UTF_8), 0,
-                    bytesRead - CRLF.length());
-            Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, bytesRead - CRLF.length(), 0, "UNKNOWN");
+            if (bytesRead > CRLF.length())
+                bytesRead -= CRLF.length();
+
+            System.out.println("size: " + (bytesRead));
+            byte[] chunkBody = Arrays.copyOfRange(new String(bodyRead).getBytes(StandardCharsets.UTF_8), 0, bytesRead);
+            Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, bytesRead, 0, "UNKNOWN");
             chunk.setData(chunkBody);
             getRestoreRecord().insertChunk(chunk);
         }

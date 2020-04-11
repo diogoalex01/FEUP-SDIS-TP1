@@ -3,6 +3,8 @@ import java.io.File;
 import java.nio.file.Files;
 import java.net.DatagramPacket;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public class MCParser implements Runnable {
     private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
@@ -104,33 +106,41 @@ public class MCParser implements Runnable {
                     if (chunkFile.exists()) {
                         // System.out.println("Chunk file exists");
                         byte[] content = Files.readAllBytes(chunkFile.toPath());
+                        String key = this.peer.makeKey(chunkID, fileID);
                         // Wait random amount of time
                         int randomTime = rand.nextInt(RANDOM_TIME);
-                        Thread.sleep(randomTime);
-                        String key = this.peer.makeKey(chunkID, fileID);
+                        // Thread.sleep(randomTime);
+                        this.peer.getRestoreRecord().insertKey(key);
 
-                        if (!this.peer.getRestoreRecord().isRestored(key)) {
-                            // this.peer.getRestoreRecord().removeKey(key);
+                        ScheduledExecutorService execService = Executors.newScheduledThreadPool(5);
+                        execService.schedule(() -> {
 
-                            // <Version> CHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF><Body>
-                            if (protocolVersion.equals("1.0")) {
-                                String chunkMessage = protocolVersion + " CHUNK " + this.peer.getID() + " " + fileID
-                                        + " " + chunkID + " " + CRLF + CRLF;
-                                ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-                                byteArrayOutputStream.write(chunkMessage.getBytes());
-                                byteArrayOutputStream.write(content);
-                                byte[] chunkBuf = byteArrayOutputStream.toByteArray();
-                                DatagramPacket chunkPacket = new DatagramPacket(chunkBuf, chunkBuf.length,
-                                        this.peer.getMDRGroup(), this.peer.getMDRPort());
-                                this.peer.getMDRSocket().send(chunkPacket);
-                                System.out.println("Sent chunk with id: " + chunkID);
+                            if (this.peer.getRestoreRecord().isRestored(key)) {
+                                this.peer.getRestoreRecord().removeKey(key);
+                                try {
+                                    // <Version> CHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF><Body>
+                                    if (protocolVersion.equals("1.0")) {
+                                        String chunkMessage = protocolVersion + " CHUNK " + this.peer.getID() + " "
+                                                + fileID + " " + chunkID + " " + CRLF + CRLF;
+                                        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                                        byteArrayOutputStream.write(chunkMessage.getBytes());
+                                        byteArrayOutputStream.write(content);
+                                        byte[] chunkBuf = byteArrayOutputStream.toByteArray();
+                                        DatagramPacket chunkPacket = new DatagramPacket(chunkBuf, chunkBuf.length,
+                                                this.peer.getMDRGroup(), this.peer.getMDRPort());
+                                        this.peer.getMDRSocket().send(chunkPacket);
+                                        System.out.println("Sent chunk with id: " + chunkID);
+                                    } else {
+                                        System.out.println("Sending chunk " + chunkID);
+                                        this.peer.sendOverTCP(senderID, protocolVersion, chunkID, fileID, content);
+                                    }
+                                } catch (Exception e) {
+                                    e.printStackTrace();
+                                }
                             } else {
-                                System.out.println("Sending chunk " + chunkID);
-                                this.peer.sendOverTCP(senderID, protocolVersion, chunkID, fileID, content);
+                                System.out.println("JA alguem mandou o " + chunkID);
                             }
-                        } else {
-                            System.out.println("JA alguem mandou o " + chunkID);
-                        }
+                        }, randomTime, TimeUnit.MILLISECONDS);
                     }
                 }
             }
@@ -158,24 +168,33 @@ public class MCParser implements Runnable {
 
                             // Sleep
                             int randomTime = rand.nextInt(RANDOM_TIME);
-                            Thread.sleep(randomTime);
+                            // Thread.sleep(randomTime);
 
-                            if (this.peer.getRemoveRecord().wasRemoved(key)) {
-                                System.out.println("No one sent... Sending...");
-                                Chunk chunk = new Chunk(Integer.parseInt(chunkID), fileID, chunkBody.length,
-                                        this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree(),
-                                        "UNKNOWN");
-                                chunk.setData(chunkBody);
-                                chunk.setActualReplicationDegree(
-                                        this.peer.getStoredChunks().getChunkInfo(key).getActualReplicationDegree());
-                                // chunk.setDesiredReplicationDegree(
-                                // this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree());
-                                System.out.println("A repor o chunk com ARD: " + chunk.getActualReplicationDegree()
-                                        + " e RD: " + chunk.getDesiredReplicationDegree());
-                                this.peer.sendStopAndWait(chunk, chunk.getDesiredReplicationDegree(), fileID, key);
-                            } else {
-                                System.out.println("Someone else already sent!");
-                            }
+                            ScheduledExecutorService execService = Executors.newScheduledThreadPool(5);
+                            execService.schedule(() -> {
+
+                                if (this.peer.getRemoveRecord().wasRemoved(key)) {
+                                    System.out.println("No one sent... Sending...");
+                                    Chunk chunk = new Chunk(Integer.parseInt(chunkID), fileID, chunkBody.length,
+                                            this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree(),
+                                            "UNKNOWN");
+                                    chunk.setData(chunkBody);
+                                    chunk.setActualReplicationDegree(
+                                            this.peer.getStoredChunks().getChunkInfo(key).getActualReplicationDegree());
+                                    // chunk.setDesiredReplicationDegree(
+                                    // this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree());
+                                    System.out.println("A repor o chunk com ARD: " + chunk.getActualReplicationDegree()
+                                            + " e RD: " + chunk.getDesiredReplicationDegree());
+                                    try {
+                                        this.peer.sendStopAndWait(chunk, chunk.getDesiredReplicationDegree(), fileID,
+                                                key);
+                                    } catch (Exception e) {
+                                        e.printStackTrace();
+                                    }
+                                } else {
+                                    System.out.println("Someone else already sent!");
+                                }
+                            }, randomTime, TimeUnit.MILLISECONDS);
                         }
                     }
                 }

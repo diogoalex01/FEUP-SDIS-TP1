@@ -10,31 +10,35 @@ public class RestoreRecord {
         restoredChunks = new ConcurrentSkipListSet<Chunk>();
     }
 
-    public void insertKey(String key) {
+    public synchronized void insertKey(String key) {
         record.add(key);
     }
 
-    public boolean removeKey(String key) {
+    public synchronized boolean removeKey(String key) {
         return record.remove(key);
     }
 
-    public void insertChunk(Chunk chunk) {
+    public synchronized void insertChunk(Chunk chunk) {
         restoredChunks.add(chunk);
     }
 
-    public boolean removeChunk(Chunk chunk) {
+    public synchronized boolean removeChunk(Chunk chunk) {
         return restoredChunks.remove(chunk);
     }
 
-    public boolean isRestored(String key) {
+    public synchronized boolean isRestored(String key) {
         return record.contains(key);
     }
 
-    public Set<Chunk> getRestoredChunks() {
+    public synchronized Set<Chunk> getRestoredChunks() {
         return restoredChunks;
     }
 
-    public void clear() {
+    public synchronized Set<Chunk> getRestoredSet() {
+        return restoredChunks;
+    }
+
+    public synchronized void clear() {
         record.clear();
         restoredChunks.clear();
     }

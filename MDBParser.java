@@ -8,6 +8,8 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Random;
 import java.net.DatagramPacket;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public class MDBParser implements Runnable {
     private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
@@ -30,7 +32,7 @@ public class MDBParser implements Runnable {
             String received = new String(this.packet.getData(), 0, this.packet.getLength(), StandardCharsets.UTF_8);
             Random rand = new Random();
             String[] receivedMessage;
-            String chunkBody = "";
+            final String chunkBody;
 
             receivedMessage = received.split("[\\u0020]+", 7); // blank space UTF-8
             chunkBody = receivedMessage[6].substring(2 * CRLF.length());
@@ -88,9 +90,17 @@ public class MDBParser implements Runnable {
                     final Path path = Paths.get(chunkFileName);
 
                     if (Files.exists(path)) {
-                        Thread.sleep(randomTime);
-                        System.out.println("Sent STORED because I'm storing it!");
-                        this.peer.getMCSocket().send(storedReply);
+                        // Thread.sleep(randomTime);
+                        ScheduledExecutorService execService = Executors.newScheduledThreadPool(5);
+                        execService.schedule(() -> {
+                            System.out.println("Sent STORED because I'm storing it!");
+                            try {
+                                this.peer.getMCSocket().send(storedReply);
+
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                        }, randomTime, TimeUnit.MILLISECONDS);
                         return;
                     }
                 } catch (Exception e) {
@@ -113,29 +123,36 @@ public class MDBParser implements Runnable {
                 }
 
                 // Wait random amount of time
-                Thread.sleep(randomTime);
+                //Thread.sleep(randomTime);
 
-                // Only actually stores the chunk (data) if the replication
-                // degree wasn't already met by the other peers
-                if (this.peer.getStoredChunks().getChunkInfo(key).getActualReplicationDegree() < this.peer
-                        .getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree()) {
-                    // System.out.println("waited " + randomTime);
+                ScheduledExecutorService execService = Executors.newScheduledThreadPool(5);
+                execService.schedule(() -> {
+                    try {
+                        // Only actually stores the chunk (data) if the replication
+                    // degree wasn't already met by the other peers
+                    if (this.peer.getStoredChunks().getChunkInfo(key).getActualReplicationDegree() < this.peer
+                    .getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree()) {
+                // System.out.println("waited " + randomTime);
 
-                    // Store chunk
-                    final Path fileDirPath = Paths.get(fileDirName);
+                // Store chunk
+                final Path fileDirPath = Paths.get(fileDirName);
 
-                    if (Files.notExists(fileDirPath)) {
-                        Files.createDirectories(fileDirPath);
-                    }
-
-                    OutputStream outputStream = new FileOutputStream(chunkFileName);
-                    outputStream.write(chunkBody.getBytes(StandardCharsets.UTF_8));
-                    outputStream.close();
-                    System.out.println("Sent STORED");
-                    // Reply to sender
-                    this.peer.getMCSocket().send(storedReply);
-                    this.peer.getStoredChunks().getChunkInfo(key).updateActualReplicationDegree(1);
+                if (Files.notExists(fileDirPath)) {
+                    Files.createDirectories(fileDirPath);
                 }
+
+                OutputStream outputStream = new FileOutputStream(chunkFileName);
+                outputStream.write(chunkBody.getBytes(StandardCharsets.UTF_8));
+                outputStream.close();
+                System.out.println("Sent STORED");
+                // Reply to sender
+                this.peer.getMCSocket().send(storedReply);
+                this.peer.getStoredChunks().getChunkInfo(key).updateActualReplicationDegree(1);
+            }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }, randomTime, TimeUnit.MILLISECONDS);
             } else {
                 System.out.println("PUTCHUNK command not found!");
             }

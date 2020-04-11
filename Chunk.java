@@ -27,7 +27,8 @@ public class Chunk extends ChunkInfo {
                 && super.getSize() == chunk.getSize()
                 && super.getDesiredReplicationDegree() == chunk.getDesiredReplicationDegree()
                 && super.getActualReplicationDegree() == chunk.getActualReplicationDegree()
-                && super.getFileName().equals(chunk.getFileName()));
+                && super.getFileName().equals(chunk.getFileName())
+                && data.equals(chunk.getData()));
     }
 
     @Override

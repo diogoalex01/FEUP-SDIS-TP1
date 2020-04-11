@@ -2,6 +2,8 @@ import java.net.DatagramPacket;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public class MDRParser implements Runnable {
     private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
@@ -46,8 +48,8 @@ public class MDRParser implements Runnable {
                 if (this.peer.getStoredRecord().getChunkInfo(key) == null) {
                     // Only stores a new key if the chunk wasn't
                     // already restored by any of the other peers
-                    if (!this.peer.getRestoreRecord().isRestored(key)) {
-                        this.peer.getRestoreRecord().insertKey(key);
+                    if (this.peer.getRestoreRecord().isRestored(key)) {
+                        this.peer.getRestoreRecord().removeKey(key);
                     }
                 } else {
                     // Original file owner, stores new chunks to assemble file
