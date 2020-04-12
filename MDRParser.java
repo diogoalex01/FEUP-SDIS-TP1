@@ -25,10 +25,13 @@ public class MDRParser implements Runnable {
             String received = new String(this.packet.getData(), 0, this.packet.getLength(), StandardCharsets.UTF_8);
             Random rand = new Random();
             String[] receivedMessage;
-            String chunkBody = "";
 
             receivedMessage = received.split("[\\u0020]+", 6); // blank space UTF-8
-            chunkBody = receivedMessage[5].substring(2 * CRLF.length());
+            int bodyStartIndex = received.indexOf(CRLF) + 2 * CRLF.length();
+            final byte[] chunkBody = Arrays.copyOfRange(packet.getData(), bodyStartIndex, packet.getLength());
+            // System.out.println("BodystateIndex =  " + bodyStartIndex);
+            // System.out.println("RECEIVED packet with " + packet.getLength() + " bytes");
+            // System.out.println("RECEIVED chunk with " + chunkBody.length + " bytes");
 
             String protocolVersion = receivedMessage[0];
             String command = receivedMessage[1];
@@ -42,7 +45,7 @@ public class MDRParser implements Runnable {
             }
 
             if (command.equals("CHUNK")) {
-                System.out.println("CHUNK");
+                // System.out.println("CHUNK");
                 // Checks if the chunk belongs to a local file
                 // True if peer is not original file owner.
                 if (this.peer.getStoredRecord().getChunkInfo(key) == null) {
@@ -55,9 +58,9 @@ public class MDRParser implements Runnable {
                     // Original file owner, stores new chunks to assemble file
                     if (!this.peer.getRestoreRecord().isRestored(key)) {
                         this.peer.getRestoreRecord().insertKey(key);
-                        Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, chunkBody.length(), 0,
-                                "UNKNOWN");
-                        chunk.setData(chunkBody.getBytes(StandardCharsets.UTF_8));
+                        Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, chunkBody.length, 0, "UNKNOWN");
+                        // System.out.println("Received chunk with size =  " + chunkBody.length + " bytes");
+                        chunk.setData(chunkBody);
                         this.peer.getRestoreRecord().insertChunk(chunk);
                     }
                 }
@@ -81,7 +84,7 @@ public class MDRParser implements Runnable {
                     this.peer.receiveOverTCP(hostname, port, chunkNumber, fileID);
                 }
             } else {
-                System.out.println("Valid command not found!");
+                // System.out.println("Valid command not found!");
             }
         } catch (Exception e) {
             e.printStackTrace();

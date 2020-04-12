@@ -29,6 +29,7 @@ public class MCParser implements Runnable {
             String senderID = receivedMessage[2];
             String fileID = receivedMessage[3];
             Random rand = new Random();
+            int randomTime = rand.nextInt(RANDOM_TIME);
 
             if (senderID.equals(this.peer.getID()))
                 return;
@@ -73,7 +74,7 @@ public class MCParser implements Runnable {
             else if (command.equals("DELETE")) {
                 File backupDir = new File(this.peer.getBackupDirPath());
                 File fileIDDir = new File(backupDir.getPath(), fileID);
-
+                this.peer.getTimeline().insertDeletion(fileID);
                 if (fileIDDir.exists()) {
                     String[] entries = fileIDDir.list();
                     for (String entry : entries) {
@@ -107,11 +108,10 @@ public class MCParser implements Runnable {
                         // System.out.println("Chunk file exists");
                         byte[] content = Files.readAllBytes(chunkFile.toPath());
                         String key = this.peer.makeKey(chunkID, fileID);
-                        // Wait random amount of time
-                        int randomTime = rand.nextInt(RANDOM_TIME);
-                        // Thread.sleep(randomTime);
-                        this.peer.getRestoreRecord().insertKey(key);
 
+                        this.peer.getRestoreRecord().insertKey(key);
+                        // Thread.sleep(randomTime);
+                        // Wait random amount of time to execute
                         ScheduledExecutorService execService = Executors.newScheduledThreadPool(5);
                         execService.schedule(() -> {
 
@@ -129,7 +129,7 @@ public class MCParser implements Runnable {
                                         DatagramPacket chunkPacket = new DatagramPacket(chunkBuf, chunkBuf.length,
                                                 this.peer.getMDRGroup(), this.peer.getMDRPort());
                                         this.peer.getMDRSocket().send(chunkPacket);
-                                        System.out.println("Sent chunk with id: " + chunkID);
+                                        System.out.println("Restoring chunk with size: " + content.length);
                                     } else {
                                         System.out.println("Sending chunk " + chunkID);
                                         this.peer.sendOverTCP(senderID, protocolVersion, chunkID, fileID, content);
@@ -138,7 +138,7 @@ public class MCParser implements Runnable {
                                     e.printStackTrace();
                                 }
                             } else {
-                                System.out.println("JA alguem mandou o " + chunkID);
+                                System.out.println("Someone already sent " + chunkID);
                             }
                         }, randomTime, TimeUnit.MILLISECONDS);
                     }
@@ -166,10 +166,8 @@ public class MCParser implements Runnable {
                             chunkBody = Files.readAllBytes(chunkFile.toPath());
                             this.peer.getRemoveRecord().insertKey(key);
 
-                            // Sleep
-                            int randomTime = rand.nextInt(RANDOM_TIME);
                             // Thread.sleep(randomTime);
-
+                            // Wait random amount of time
                             ScheduledExecutorService execService = Executors.newScheduledThreadPool(5);
                             execService.schedule(() -> {
 
@@ -206,6 +204,12 @@ public class MCParser implements Runnable {
                     this.peer.getStoredRecord().getChunkInfo(key).removeHolders(senderID);
                     System.out.println("Updating storedRecord");
                 }
+            } else if (command.equals("UPDATE")) {
+                ScheduledExecutorService execService = Executors.newScheduledThreadPool(5);
+                execService.schedule(() -> {
+                    this.peer.sendAllDeletions();
+                }, randomTime, TimeUnit.MILLISECONDS);
+
             }
         } catch (Exception e) {
             e.printStackTrace();

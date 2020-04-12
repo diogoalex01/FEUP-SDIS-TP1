@@ -35,7 +35,6 @@ public class MulticastManager {
                 try {
                     this.peer.getMDBSocket().receive(packet);
                     executor.execute(new MDBParser(this.peer, packet));
-
                 } catch (Exception e) {
                     e.printStackTrace();
                 }

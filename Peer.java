@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.MulticastSocket;
 import java.net.SocketException;
@@ -24,6 +25,9 @@ import java.util.Random;
 import java.text.DecimalFormat;
 import static java.lang.Math.toIntExact;
 
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+
 // java Peer 1.0 1 AP1 230.0.0.0 4445 231.0.0.0 4446 232.0.0.0 4447
 
 public class Peer implements RemoteInterface {
@@ -35,11 +39,13 @@ public class Peer implements RemoteInterface {
     private static String ID;
     private static StoredRecord storedRecord;
     private static StoredChunks storedChunks;
+    private static Timeline timeline;
     private static String storageDirPath;
     private static String backupDirPath;
     private static String restoreDirPath;
     private static String storagePathRecord;
     private static String storagePathChunks;
+    private static String storagePathTimeline;
     private static ScheduledThreadPoolExecutor executor;
     private String accessPoint;
     private String protocolVersion;
@@ -73,12 +79,15 @@ public class Peer implements RemoteInterface {
         restoreDirPath = storageDirPath + "/Restore";
         storagePathRecord = storageDirPath + "/record.ser";
         storagePathChunks = storageDirPath + "/chunks.ser";
+        storagePathTimeline = storageDirPath + "/timeline.ser";
         final Path dirPath = Paths.get(storageDirPath);
         final Path pathRecord = Paths.get(storagePathRecord);
         final Path pathChunk = Paths.get(storagePathChunks);
+        final Path pathTimeline = Paths.get(storagePathTimeline);
 
         storedRecord = new StoredRecord();
         storedChunks = new StoredChunks();
+        timeline = new Timeline();
         this.restoreRecord = new RestoreRecord();
         this.removeRecord = new RemoveRecord();
 
@@ -117,6 +126,12 @@ public class Peer implements RemoteInterface {
         MDRSocket = new MulticastSocket(this.MDRPort);
         MDRSocket.joinGroup(MDRGroup);
         this.multicastManager = new MulticastManager(this);
+
+        ScheduledExecutorService execService = Executors.newScheduledThreadPool(5);
+        execService.schedule(() -> {
+            askForUpdate();
+        }, 0, TimeUnit.MILLISECONDS);
+
     }
 
     public static void main(String[] args) {
@@ -183,6 +198,32 @@ public class Peer implements RemoteInterface {
         }
     }
 
+    public static void serializeTimeline() {
+        try {
+            FileOutputStream fileOutputStreamTimeline = new FileOutputStream(storagePathTimeline);
+            ObjectOutputStream objectOutputStreamTimeline = new ObjectOutputStream(fileOutputStreamTimeline);
+            objectOutputStreamTimeline.writeObject(timeline);
+            objectOutputStreamTimeline.close();
+            fileOutputStreamTimeline.close();
+            System.out.println("Data was stored under " + storagePathTimeline);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void deserializeTimeline() {
+        try {
+            FileInputStream fileInputStreamTimeline = new FileInputStream(storagePathTimeline);
+            ObjectInputStream objectInputStreamTimeline = new ObjectInputStream(fileInputStreamTimeline);
+            timeline = (Timeline) objectInputStreamTimeline.readObject();
+            objectInputStreamTimeline.close();
+            fileInputStreamTimeline.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return;
+        }
+    }
+
     public static void serializeChunks() {
         try {
             FileOutputStream fileOutputStreamChunks = new FileOutputStream(storagePathChunks);
@@ -227,6 +268,10 @@ public class Peer implements RemoteInterface {
 
     public StoredRecord getStoredRecord() {
         return storedRecord;
+    }
+
+    public Timeline getTimeline() {
+        return timeline;
     }
 
     public synchronized RestoreRecord getRestoreRecord() {
@@ -338,7 +383,7 @@ public class Peer implements RemoteInterface {
             DatagramPacket putChunkPacket = new DatagramPacket(putChunkBuf, putChunkBuf.length, getMDBGroup(),
                     getMDBPort());
             getMDBSocket().send(putChunkPacket);
-            System.out.println("Sending chunk");
+            System.out.println("Sending chunk with " + chunk.getSize() + "/" + chunk.getData().length + "bytes");
 
             timesSent++;
 
@@ -394,7 +439,7 @@ public class Peer implements RemoteInterface {
     public void reclaim(int availableStorage) throws IOException, NoSuchAlgorithmException {
         String reclaimMessage;
         String key;
-        storedChunks.setAvailableStorage(availableStorage);
+        storedChunks.setAvailableStorage(availableStorage * 1000);
 
         for (ChunkInfo chunkInfo : storedChunks.getChunks()) {
 
@@ -505,13 +550,13 @@ public class Peer implements RemoteInterface {
         state += storedRecord.print();
         state += "\n Stored File Chunks: \n";
         state += storedChunks.print();
-        state += "\nMaximum Storage Capacity: " + storedChunks.getAvailableStorage() + " Bytes";
+        state += "\nMaximum Storage Capacity: " + storedChunks.getAvailableStorage() / 1000 + " KBytes";
         DecimalFormat decimalFormat = new DecimalFormat("###.##%");
         double ratio = storedChunks.getAvailableStorage() != 0
                 ? (double) storedChunks.getOccupiedStorage() / storedChunks.getAvailableStorage()
                 : 0;
-        state += "\nOccupied Storage: " + storedChunks.getOccupiedStorage() + " Bytes ( " + decimalFormat.format(ratio)
-                + " )\n";
+        state += "\nOccupied Storage: " + storedChunks.getOccupiedStorage() / 1000 + " KBytes ( "
+                + decimalFormat.format(ratio) + " )\n";
 
         return state;
     }
@@ -531,7 +576,7 @@ public class Peer implements RemoteInterface {
 
             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
             for (Chunk chunk : restoreRecord.getRestoredChunks()) {
-                System.out.println("Copying form chunk "+ chunk.getID());
+                System.out.println("Copying form chunk " + chunk.getID());
                 byteArrayOutputStream.write(chunk.getData());
             }
 
@@ -547,65 +592,97 @@ public class Peer implements RemoteInterface {
 
     public void sendOverTCP(String receiverID, String protocolVersion, String chunkID, String fileID, byte[] chunkBody)
             throws IOException {
-        Random rand = new Random();
-        int randomFactor = rand.nextInt(2 * RANDOM_TIME);
-        // avoids port collision
-        // int portNumber = (Integer.parseInt(ID) +
-        // toIntExact(Thread.currentThread().getId()) + Integer.parseInt(chunkID)
-        // + randomFactor) % 65535;
-        int portNumber = (Integer.parseInt(chunkID) + randomFactor) % 65535;
-        System.out.println("PORT => " + portNumber);
-        String hostName = "127.0.0.1"; // localhost
         String connectMessage = "";
 
-        // <Version> CONNECT <SenderID> <FileID> <ChunkNo> <hostName>
-        // <port> <CRLF><CRLF>
-        connectMessage += protocolVersion + " CONNECT " + ID + " " + fileID + " " + chunkID + " " + hostName + " "
-                + portNumber + " " + CRLF + CRLF;
-        byte[] connectBuf = connectMessage.getBytes();
-        DatagramPacket connectPacket = new DatagramPacket(connectBuf, connectBuf.length, MDRGroup, MDRPort);
-        MulticastSocket chunkSocket = MDRSocket;
-        
-        chunkSocket.send(connectPacket);
-        try (ServerSocket serverSocket = new ServerSocket(portNumber);
-                Socket clientSocket = serverSocket.accept();
-                PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);) {
-            // System.out.println("Accepted TCP connection");
-            out.println(new String(chunkBody, 0, chunkBody.length, StandardCharsets.UTF_8));
-            System.out.println("Sent " + chunkBody.length + " bytes");
+        // Returns the preferred outbound IP
+        DatagramSocket socket = new DatagramSocket();
+        socket.connect(InetAddress.getByName("8.8.8.8"), 10002);
+        String hostname = socket.getLocalAddress().getHostAddress();
+        socket.close();
+
+        try {
+            ServerSocket serverSocket = new ServerSocket(0); // Uses the first available port
+            int portNumber = serverSocket.getLocalPort();
+
+            // <Version> CONNECT <SenderID> <FileID> <ChunkNo> <hostName>
+            // <port> <CRLF><CRLF>
+            connectMessage += protocolVersion + " CONNECT " + ID + " " + fileID + " " + chunkID + " " + hostname + " "
+                    + portNumber + " " + CRLF + CRLF;
+            byte[] connectBuf = connectMessage.getBytes();
+            DatagramPacket connectPacket = new DatagramPacket(connectBuf, connectBuf.length, MDRGroup, MDRPort);
+            MulticastSocket chunkSocket = MDRSocket;
+            chunkSocket.send(connectPacket);
+
+            Socket clientSocket = serverSocket.accept();
+            OutputStream out = clientSocket.getOutputStream();
+            out.write(chunkBody);
+            out.flush();
+
+            serverSocket.close();
+            clientSocket.close();
+            out.close();
         } catch (Exception e) {
             e.printStackTrace();
             return;
         }
     }
 
-    public void receiveOverTCP(String hostName, String port, String chunkNumber, String fileID) {
+    public void receiveOverTCP(String hostname, String port, String chunkNumber, String fileID) {
         int portNumber = Integer.parseInt(port);
-        String fromServer;
-        char[] bodyRead = new char[BACKUP_BUFFER_SIZE];
+        byte[] bodyRead = new byte[BACKUP_BUFFER_SIZE];
+        byte[] chunkBody = new byte[BACKUP_BUFFER_SIZE];
         String chunkKey = makeKey(chunkNumber, fileID);
-        int bytesRead = 0;
+        int bytesRead = -1;
 
         if (!getRestoreRecord().isRestored(chunkKey)) {
             getRestoreRecord().insertKey(chunkKey);
 
-            try (Socket restoreSocket = new Socket(hostName, portNumber);
-                    BufferedReader in = new BufferedReader(new InputStreamReader(restoreSocket.getInputStream()));) {
+            try {
+                Socket restoreSocket = new Socket(hostname, portNumber);
+                InputStream inputStream = restoreSocket.getInputStream();
+
+                // Read from the stream
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                while ((bytesRead = inputStream.read(bodyRead)) != -1) {
+                    buffer.write(bodyRead, 0, bytesRead);
+                }
+
                 System.out.println("Receiving over TCP");
-                bytesRead = in.read(bodyRead);
-                in.close();
+                buffer.flush();
+                chunkBody = buffer.toByteArray();
+
+                buffer.close();
+                restoreSocket.close();
             } catch (Exception e) {
                 e.printStackTrace();
             }
 
-            if (bytesRead > CRLF.length())
-                bytesRead -= CRLF.length();
+            // if (bytesRead > CRLF.length())
+            // bytesRead -= CRLF.length();
 
-            System.out.println("size: " + (bytesRead));
-            byte[] chunkBody = Arrays.copyOfRange(new String(bodyRead).getBytes(StandardCharsets.UTF_8), 0, bytesRead);
-            Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, bytesRead, 0, "UNKNOWN");
+            Chunk chunk = new Chunk(Integer.parseInt(chunkNumber), fileID, chunkBody.length, 0, "UNKNOWN");
             chunk.setData(chunkBody);
             getRestoreRecord().insertChunk(chunk);
         }
+    }
+
+    public void askForUpdate() {
+        // <Version> update <SenderId> <####> <CRLF><CRLF>
+        String updateMessage = this.protocolVersion + " UPDATE " + ID + " " + "#####" + " " + CRLF + CRLF;
+        byte[] updateBuf = updateMessage.getBytes();
+        DatagramPacket updatePacket = new DatagramPacket(updateBuf, updateBuf.length, MCGroup, MCPort);
+        try {
+            MCSocket.send(updatePacket);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void sendAllDeletions() {
+        // <Version> update <SenderId> <FileId> <CRLF><CRLF>
+        String updateMessage = this.protocolVersion + " UPDATE " + ID + " " + "#####" + " " + CRLF + CRLF;
+        byte[] updateBuf = updateMessage.getBytes();
+        DatagramPacket updatePacket = new DatagramPacket(updateBuf, updateBuf.length, MCGroup, MCPort);
+        // MCSocket.send(updatePacket);
     }
 }
