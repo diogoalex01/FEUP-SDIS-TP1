@@ -1,30 +1,35 @@
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.util.concurrent.ConcurrentHashMap;
+import java.io.Serializable;
 
-public class Timeline {
+public class Timeline implements Serializable {
 
-    ConcurrentHashMap<String, Timestamp> deletedChunks; //Record of deleted chunks and time of deletion
+    ConcurrentHashMap<String, Timestamp> deletedChunks; // Record of deleted chunks and time of deletion
 
-    public Timeline(){
+    public Timeline() {
         deletedChunks = new ConcurrentHashMap<String, Timestamp>();
     }
 
-    public void insertDeletion(String key){
+    public synchronized void insertDeletion(String key) {
         Timestamp timestamp = new Timestamp(System.currentTimeMillis());
         deletedChunks.putIfAbsent(key, timestamp);
     }
 
-    public void removeDeletion(String key){
+    public synchronized void removeDeletion(String key) {
         deletedChunks.remove(key);
     }
 
-    public boolean wasDeleted(String key){
+    public synchronized boolean wasDeleted(String key) {
         return deletedChunks.containsKey(key);
     }
 
-    public Timestamp getTimeOfDeletion(String key){
+    public synchronized Timestamp getTimeOfDeletion(String key) {
         return deletedChunks.get(key);
+    }
+
+    public synchronized ConcurrentHashMap<String, Timestamp> getMap() {
+        return deletedChunks;
     }
 
 }

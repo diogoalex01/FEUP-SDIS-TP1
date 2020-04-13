@@ -9,19 +9,19 @@ public class RemoveRecord {
         record = removedMap.newKeySet();
     }
 
-    public void insertKey(String key) {
+    public synchronized void insertKey(String key) {
         record.add(key);
     }
 
-    public boolean removeKey(String key) {
+    public synchronized boolean removeKey(String key) {
         return record.remove(key);
     }
 
-    public boolean wasRemoved(String key) {
+    public synchronized boolean wasRemoved(String key) {
         return record.contains(key);
     }
 
-    public Set<String> getRemoveRecord() {
+    public synchronized Set<String> getRemoveRecord() {
         return record;
     }
 }

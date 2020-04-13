@@ -2,15 +2,19 @@ import java.io.Serializable;
 import java.util.Collection;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.stream.Collectors;
 
 public class StoredChunks implements Serializable {
     ConcurrentHashMap<String, ChunkInfo> storedChunks; // Chunks stored in this peer
+    ConcurrentSkipListSet<String> fileNames; // Record of files stored in this peer
+
     int occupiedStorage;
     int availableStorage;
 
     public StoredChunks() {
         storedChunks = new ConcurrentHashMap<String, ChunkInfo>();
+        fileNames = new ConcurrentSkipListSet<String>();
         this.occupiedStorage = 0; // bytes
         this.availableStorage = 256000; // bytes
     }
@@ -18,11 +22,15 @@ public class StoredChunks implements Serializable {
     public void insert(String key, ChunkInfo chunkInfo) {
         storedChunks.putIfAbsent(key, chunkInfo);
         occupiedStorage += chunkInfo.getSize();
+        int underScoreIndex = key.lastIndexOf("_");
+        fileNames.add(key.substring(underScoreIndex + 1));
     }
 
     public void remove(String key) {
         occupiedStorage -= storedChunks.get(key).getSize();
         storedChunks.remove(key);
+        int underScoreIndex = key.lastIndexOf("_");
+        fileNames.remove(key.substring(underScoreIndex + 1));
     }
 
     public int getOccupiedStorage() {
@@ -64,14 +72,20 @@ public class StoredChunks implements Serializable {
 
     public String print() {
         String state = "";
+        for (String fileID : fileNames) {
+            Set<String> ChunkIDset = storedChunks.keySet().stream().filter(string -> string.endsWith("_" + fileID))
+                    .collect(Collectors.toSet());
 
-        for (ChunkInfo chunk : storedChunks.values()) {
-            state += "\n\tChunk ID: " + chunk.getFileID() + "_" + chunk.getID();
-            state += "\n\tSize: " + chunk.getSize() + " Bytes";
-            state += "\n\tActual Replication Degree: " + chunk.getActualReplicationDegree();
+            for (String chunkKey : ChunkIDset) {
+                state += "\n> Chunk ID: " + storedChunks.get(chunkKey).getFileID() + "_"
+                        + storedChunks.get(chunkKey).getID();
+                state += "\n    Size: " + storedChunks.get(chunkKey).getSize() + " Bytes";
+                state += "\n    Actual Replication Degree: " + storedChunks.get(chunkKey).getActualReplicationDegree();
+            }
+
         }
 
-        state += "\n";
+        state += "\n\n";
         return state;
     }
 }

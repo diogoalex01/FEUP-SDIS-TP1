@@ -36,9 +36,6 @@ public class MDBParser implements Runnable {
             receivedMessage = received.split("[\\u0020]+", 7); // blank space UTF-8
             int bodyStartIndex = received.indexOf(CRLF) + 2 * CRLF.length();
             final byte[] chunkBody = Arrays.copyOfRange(packet.getData(), bodyStartIndex, packet.getLength());
-            // System.out.println("BodystateIndex =  " + bodyStartIndex);
-            // System.out.println("RECEIVED packet with " + packet.getLength() + " bytes");
-            // System.out.println("RECEIVED chunk with " + chunkBody.length + " bytes");
 
             String protocolVersion = receivedMessage[0];
             String command = receivedMessage[1];
@@ -52,7 +49,6 @@ public class MDBParser implements Runnable {
             // If a peer reads its own message
             // or if it receives a chunk it has previously backed up
             if (senderID.equals(this.peer.getID()) || this.peer.getStoredRecord().getChunkInfo(key) != null) {
-                System.out.println("I have the original file");
                 return;
             }
 
@@ -64,7 +60,11 @@ public class MDBParser implements Runnable {
                     this.peer.getMCPort());
 
             if (command.equals("PUTCHUNK")) {
-                // System.out.println("Received PUTCHUNK");
+
+                if (this.peer.getTimeline().wasDeleted(fileID)) {
+                    this.peer.getTimeline().removeDeletion(fileID);
+                }
+
                 if (this.peer.getRemoveRecord().wasRemoved(key)) {
                     this.peer.getRemoveRecord().removeKey(key);
                     return;
@@ -72,7 +72,6 @@ public class MDBParser implements Runnable {
 
                 // If the chunk has size of 0 Bytes, it is ignored
                 if (chunkBody.length == 0) {
-                    // System.out.println("Empty chunk");
                     // Reply to sender
                     this.peer.getMCSocket().send(storedReply);
                     return;
@@ -81,7 +80,6 @@ public class MDBParser implements Runnable {
                 // Only backs up the chunk if the peer has enough available storage
                 if (this.peer.getStoredChunks().getOccupiedStorage() + chunkBody.length > this.peer.getStoredChunks()
                         .getAvailableStorage()) {
-                    // System.out.println("No storage available to store a new chunk!");
                     return;
                 }
 
@@ -93,10 +91,8 @@ public class MDBParser implements Runnable {
                     final Path path = Paths.get(chunkFileName);
 
                     if (Files.exists(path)) {
-                        // Thread.sleep(randomTime);
                         ScheduledExecutorService execService = Executors.newScheduledThreadPool(5);
                         execService.schedule(() -> {
-                            // System.out.println("Sent STORED because I'm storing it!");
                             try {
                                 this.peer.getMCSocket().send(storedReply);
 
@@ -107,7 +103,6 @@ public class MDBParser implements Runnable {
                         return;
                     }
                 } catch (Exception e) {
-                    // System.err.println("Path exception: " + e.toString());
                     e.printStackTrace();
                 }
 
@@ -133,7 +128,7 @@ public class MDBParser implements Runnable {
                         // degree wasn't already met by the other peers
                         if (this.peer.getStoredChunks().getChunkInfo(key).getActualReplicationDegree() < this.peer
                                 .getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree()) {
-                            System.out.println("waited " + randomTime);
+                            System.out.println("Waited " + randomTime + "ms before replying.");
                             // Store chunk
                             final Path fileDirPath = Paths.get(fileDirName);
 
@@ -144,7 +139,6 @@ public class MDBParser implements Runnable {
                             OutputStream outputStream = new FileOutputStream(chunkFileName);
                             outputStream.write(chunkBody);
                             outputStream.close();
-                            // System.out.println("Sent STORED");
                             // Reply to sender
                             this.peer.getMCSocket().send(storedReply);
                             this.peer.getStoredChunks().getChunkInfo(key).updateActualReplicationDegree(1);
@@ -153,8 +147,6 @@ public class MDBParser implements Runnable {
                         e.printStackTrace();
                     }
                 }, randomTime, TimeUnit.MILLISECONDS);
-            } else {
-                // System.out.println("PUTCHUNK command not found!");
             }
         } catch (Exception e) {
             e.printStackTrace();

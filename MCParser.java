@@ -22,7 +22,6 @@ public class MCParser implements Runnable {
 
     public void parseMessageMC() {
         try {
-            // System.out.println("REC: " + received);
             String[] receivedMessage = received.split("[\\u0020]+"); // blank space UTF-8
             String protocolVersion = receivedMessage[0];
             String command = receivedMessage[1];
@@ -36,7 +35,6 @@ public class MCParser implements Runnable {
 
             // <Version> STORED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
             if (command.equals("STORED")) {
-                System.out.println("STORED");
                 String chunkID = receivedMessage[4];
                 String key = this.peer.makeKey(chunkID, fileID);
 
@@ -44,7 +42,6 @@ public class MCParser implements Runnable {
                         && !this.peer.getStoredChunks().getChunkInfo(key).getHolders().contains(senderID)) {
                     this.peer.getStoredChunks().getChunkInfo(key).updateActualReplicationDegree(1);
                     this.peer.getStoredChunks().getChunkInfo(key).addHolders(senderID);
-                    System.out.println("Updating storedChunks +1");
                 }
 
                 // Each chunk updates the replication degree of the files that
@@ -53,64 +50,28 @@ public class MCParser implements Runnable {
                         && !this.peer.getStoredRecord().getChunkInfo(key).getHolders().contains(senderID)) {
                     this.peer.getStoredRecord().getChunkInfo(key).updateActualReplicationDegree(1);
                     this.peer.getStoredRecord().getChunkInfo(key).addHolders(senderID);
-                    System.out.println("Updating storedRecord");
                 }
 
-                if (this.peer.getStoredRecord().getChunkInfo(key) != null) {
-                    System.out.println("STORED=> actual: "
-                            + this.peer.getStoredRecord().getChunkInfo(key).getActualReplicationDegree());
-                    System.out.println("STORED=> desired: "
-                            + this.peer.getStoredRecord().getChunkInfo(key).getDesiredReplicationDegree());
-                }
-
-                if (this.peer.getStoredChunks().getChunkInfo(key) != null) {
-                    System.out.println("CHUNK=> actual: "
-                            + this.peer.getStoredChunks().getChunkInfo(key).getActualReplicationDegree());
-                    System.out.println("CHUNK=> desired: "
-                            + this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree());
-                }
             }
             // <Version> DELETE <SenderId> <FileId> <CRLF><CRLF>
             else if (command.equals("DELETE")) {
-                File backupDir = new File(this.peer.getBackupDirPath());
-                File fileIDDir = new File(backupDir.getPath(), fileID);
-                this.peer.getTimeline().insertDeletion(fileID);
-                if (fileIDDir.exists()) {
-                    String[] entries = fileIDDir.list();
-                    for (String entry : entries) {
-                        File currentFile = new File(fileIDDir.getPath(), entry);
-                        currentFile.delete();
-                    }
-
-                    fileIDDir.delete();
-
-                    // Deletes backup directory if it is empty after the fileID directory deletion
-                    File[] backupDirectory = backupDir.listFiles();
-                    if (backupDirectory.length == 0)
-                        backupDir.delete();
-                }
-
-                this.peer.getStoredChunks().removeFileChunks(fileID);
-                this.peer.getStoredRecord().removeFileChunks(fileID);
+                this.peer.deleteAllChunks(fileID);
             }
             // <Version> GETCHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
             else if (command.equals("GETCHUNK")) {
-                System.out.println("GETCHUUUNK");
                 String chunkID = receivedMessage[4];
                 String fileFolder = this.peer.getBackupDirPath() + "/" + fileID;
                 File file = new File(fileFolder);
 
                 if (file.exists()) {
-                    // System.out.println("Folder exists");
                     File chunkFile = new File(fileFolder + "/" + chunkID);
 
                     if (chunkFile.exists()) {
-                        // System.out.println("Chunk file exists");
                         byte[] content = Files.readAllBytes(chunkFile.toPath());
                         String key = this.peer.makeKey(chunkID, fileID);
 
                         this.peer.getRestoreRecord().insertKey(key);
-                        // Thread.sleep(randomTime);
+
                         // Wait random amount of time to execute
                         ScheduledExecutorService execService = Executors.newScheduledThreadPool(5);
                         execService.schedule(() -> {
@@ -129,17 +90,14 @@ public class MCParser implements Runnable {
                                         DatagramPacket chunkPacket = new DatagramPacket(chunkBuf, chunkBuf.length,
                                                 this.peer.getMDRGroup(), this.peer.getMDRPort());
                                         this.peer.getMDRSocket().send(chunkPacket);
-                                        System.out.println("Restoring chunk with size: " + content.length);
                                     } else {
-                                        System.out.println("Sending chunk " + chunkID);
                                         this.peer.sendOverTCP(senderID, protocolVersion, chunkID, fileID, content);
                                     }
                                 } catch (Exception e) {
                                     e.printStackTrace();
                                 }
-                            } else {
-                                System.out.println("Someone already sent " + chunkID);
                             }
+
                         }, randomTime, TimeUnit.MILLISECONDS);
                     }
                 }
@@ -159,20 +117,17 @@ public class MCParser implements Runnable {
                     this.peer.getStoredChunks().getChunkInfo(key).removeHolders(senderID);
 
                     if (file.exists()) {
-                        System.out.println("Folder exists");
                         File chunkFile = new File(fileFolder + "/" + chunkID);
 
                         if (chunkFile.exists()) {
                             chunkBody = Files.readAllBytes(chunkFile.toPath());
                             this.peer.getRemoveRecord().insertKey(key);
 
-                            // Thread.sleep(randomTime);
                             // Wait random amount of time
                             ScheduledExecutorService execService = Executors.newScheduledThreadPool(5);
                             execService.schedule(() -> {
 
                                 if (this.peer.getRemoveRecord().wasRemoved(key)) {
-                                    System.out.println("No one sent... Sending...");
                                     Chunk chunk = new Chunk(Integer.parseInt(chunkID), fileID, chunkBody.length,
                                             this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree(),
                                             "UNKNOWN");
@@ -181,17 +136,14 @@ public class MCParser implements Runnable {
                                             this.peer.getStoredChunks().getChunkInfo(key).getActualReplicationDegree());
                                     // chunk.setDesiredReplicationDegree(
                                     // this.peer.getStoredChunks().getChunkInfo(key).getDesiredReplicationDegree());
-                                    System.out.println("A repor o chunk com ARD: " + chunk.getActualReplicationDegree()
-                                            + " e RD: " + chunk.getDesiredReplicationDegree());
                                     try {
                                         this.peer.sendStopAndWait(chunk, chunk.getDesiredReplicationDegree(), fileID,
                                                 key);
                                     } catch (Exception e) {
                                         e.printStackTrace();
                                     }
-                                } else {
-                                    System.out.println("Someone else already sent!");
                                 }
+
                             }, randomTime, TimeUnit.MILLISECONDS);
                         }
                     }
@@ -202,14 +154,14 @@ public class MCParser implements Runnable {
                 if (this.peer.getStoredRecord().getChunkInfo(key) != null) {
                     this.peer.getStoredRecord().getChunkInfo(key).updateActualReplicationDegree(-1);
                     this.peer.getStoredRecord().getChunkInfo(key).removeHolders(senderID);
-                    System.out.println("Updating storedRecord");
                 }
-            } else if (command.equals("UPDATE")) {
+            }
+            // <Version> UPDATE <Placeholder> <Placeholder> <CRLF><CRLF>
+            else if (command.equals("UPDATE")) {
                 ScheduledExecutorService execService = Executors.newScheduledThreadPool(5);
                 execService.schedule(() -> {
                     this.peer.sendAllDeletions();
                 }, randomTime, TimeUnit.MILLISECONDS);
-
             }
         } catch (Exception e) {
             e.printStackTrace();

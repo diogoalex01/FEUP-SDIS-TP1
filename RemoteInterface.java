@@ -5,8 +5,7 @@ import java.rmi.RemoteException;
 import java.security.NoSuchAlgorithmException;
 
 public interface RemoteInterface extends Remote {
-    void backup(String filepath, int replicationDegree)
-            throws IOException, NoSuchAlgorithmException;
+    void backup(String filepath, int replicationDegree) throws IOException, NoSuchAlgorithmException;
 
     void restore(String filepath) throws IOException, NoSuchAlgorithmException;
 

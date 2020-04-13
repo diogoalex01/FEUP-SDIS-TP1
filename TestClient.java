@@ -20,8 +20,7 @@ public class TestClient {
         }
     }
 
-    private void parseArgs(String[] args, RemoteInterface remote)
-            throws IOException, NoSuchAlgorithmException {
+    private void parseArgs(String[] args, RemoteInterface remote) throws IOException, NoSuchAlgorithmException {
         String peerAP = args[0];
         String subProtocol = args[1];
         String opnd1 = "", opnd2 = "";
