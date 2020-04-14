@@ -2,7 +2,14 @@
 
 ## Installation Guide
 
-In order to compile and run the source code, it is required to perform the following steps in the project's directory. Start by accessing it.
+In the development of the project the following Java builds were used:
+
+```
+java 11.0.1 2018-10-16 LTS
+Java(TM) SE Runtime Environment 18.9 (build 11.0.1+13-LTS)
+```
+
+In order to compile and run the source code, it is required to perform the following steps in the project's directory. Start by accessing it. If you're using Windows use the **command line**.
 
 ```
 cd sdis1920-t2g08/
@@ -14,15 +21,15 @@ Now, you'll be able to either manually run a set of commands, or if you're using
 
 If you will be running the program on a Windows machine, you only need to follow one step. Beware that this method uses default values for the IP addresses and ports of the channel connections and peer access points.
 
-When running the script you must define the number of peers involved, as well as the protocol version used by all of them. There is also an optional flag. 
+When running the script you must define the number of peers involved, as well as the protocol version used by all of them. There is also an optional flag. On the **command line** type:
 
 ```
-./setup.bat number_of_peers protocol_version [-reset]
+setup.bat number_of_peers protocol_version [-reset]
 ```
 
 **-reset** : Resets the storage registries used to keep track of the system's state.
 
-> E.g.: `./setup.bat 3 1.0`
+> E.g.: `setup.bat 3 1.0`
 
 In the previous example, you'll see 5 windows popping up. The first is running the RMI Registry, three of them are running peers (one per requested peer) and the last will be the Test Client, where you can interact with each one of the peers by invoking the subprotocols.
 

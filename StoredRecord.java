@@ -46,14 +46,15 @@ public class StoredRecord implements Serializable {
             state += "\n    File ID: " + fileID;
             Set<String> ChunkIDset = storedRecord.keySet().stream().filter(string -> string.endsWith("_" + fileID))
                     .collect(Collectors.toSet());
+
             if (ChunkIDset.size() != 0)
                 state += "\n    Desired Replication Degree: "
                         + storedRecord.get(ChunkIDset.iterator().next()).getDesiredReplicationDegree();
             state += "\n    > Chunk Information: ";
             for (String chunkKey : ChunkIDset) {
                 state += "\n        Chunk ID: " + storedRecord.get(chunkKey).getID();
-                state += "\n        Actual Replication Degree: " + storedRecord.get(chunkKey).getActualReplicationDegree()
-                        + "\n";
+                state += "\n        Actual Replication Degree: "
+                        + storedRecord.get(chunkKey).getActualReplicationDegree() + "\n";
             }
         }
 

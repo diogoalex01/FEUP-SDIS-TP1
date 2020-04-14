@@ -2,15 +2,9 @@ import java.net.DatagramPacket;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Random;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.*;
 
 public class MDRParser implements Runnable {
-    private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
     private static final String CRLF = "\r\n"; // CRLF delimiter
-    private static final int INITIAL_WAITING_TIME = 1000; // 1 second
-    private static final int RANDOM_TIME = 400; // milliseconds
-    private static final int MAX_ATTEMPTS = 5;
     Peer peer;
     DatagramPacket packet;
 
@@ -80,6 +74,7 @@ public class MDRParser implements Runnable {
                         this.peer.getRestoreRecord().insertKey(key);
                     }
                 } else {
+                    // System.out.println("received: " + received);
                     this.peer.receiveOverTCP(hostname, port, chunkNumber, fileID);
                 }
             }

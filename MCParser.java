@@ -7,11 +7,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.*;
 
 public class MCParser implements Runnable {
-    private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
     private static final String CRLF = "\r\n"; // CRLF delimiter
-    private static final int INITIAL_WAITING_TIME = 1000; // 1 second
     private static final int RANDOM_TIME = 400; // milliseconds
-    private static final int MAX_ATTEMPTS = 5;
     Peer peer;
     String received;
 
@@ -59,6 +56,7 @@ public class MCParser implements Runnable {
             }
             // <Version> GETCHUNK <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
             else if (command.equals("GETCHUNK")) {
+                // System.out.println("received: " + received);
                 String chunkID = receivedMessage[4];
                 String fileFolder = this.peer.getBackupDirPath() + "/" + fileID;
                 File file = new File(fileFolder);

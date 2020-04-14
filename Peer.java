@@ -1,6 +1,4 @@
 import java.io.*;
-import java.io.PrintWriter;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -9,7 +7,6 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.MulticastSocket;
-import java.net.SocketException;
 import java.net.ServerSocket;
 import java.net.Socket;
 
@@ -20,11 +17,9 @@ import java.security.NoSuchAlgorithmException;
 import java.security.cert.CRL;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.Random;
 import java.text.DecimalFormat;
-import static java.lang.Math.toIntExact;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.*;
@@ -38,7 +33,6 @@ public class Peer implements RemoteInterface {
     private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
     private static final String CRLF = "\r\n"; // CRLF delimiter
     private static final int INITIAL_WAITING_TIME = 1000; // 1 second
-    private static final int RANDOM_TIME = 400; // milliseconds
     private static final int MAX_ATTEMPTS = 5;
     private static String ID;
     private static StoredRecord storedRecord;
@@ -90,7 +84,7 @@ public class Peer implements RemoteInterface {
         final Path pathTimeline = Paths.get(storagePathTimeline);
 
         storedRecord = new StoredRecord();
-        storedChunks = new StoredChunks();
+        storedChunks = new StoredChunks(backupDirPath);
         timeline = new Timeline();
         this.restoreRecord = new RestoreRecord();
         this.removeRecord = new RemoveRecord();
@@ -129,6 +123,7 @@ public class Peer implements RemoteInterface {
             System.err.println("Path exception: " + e.toString());
             e.printStackTrace();
         }
+
         // Join MC channel
         MCSocket = new MulticastSocket(this.MCPort);
         MCSocket.joinGroup(MCGroup);
@@ -349,11 +344,14 @@ public class Peer implements RemoteInterface {
             }
 
             File file = new File(fileName);
-            byte[] body = Files.readAllBytes(file.toPath());
             FileMetadata fileMetadata = new FileMetadata(file, replicationDegree);
             String fileID = fileMetadata.getID();
             Boolean keepSending;
+
             storedRecord.insertFileName(fileID, fileName);
+            if (timeline.wasDeleted(fileID)) {
+                timeline.removeDeletion(fileID);
+            }
 
             fileMetadata.makeChunks();
             System.out.println("Made " + fileMetadata.getChunks().size() + " chunks");
@@ -375,7 +373,6 @@ public class Peer implements RemoteInterface {
                     break;
                 }
             }
-
         } catch (Exception e) {
             e.printStackTrace();
             return;
@@ -388,7 +385,6 @@ public class Peer implements RemoteInterface {
         int timesSent = 0;
         byte[] putChunkBuf = new byte[BACKUP_BUFFER_SIZE], content = chunk.getData();
         long limitTime = INITIAL_WAITING_TIME;
-        int nSleeps = 0;
         boolean success = false;
 
         // Terminates after 5 unsuccessful attempts (2^n seconds) or when
@@ -405,7 +401,6 @@ public class Peer implements RemoteInterface {
             DatagramPacket putChunkPacket = new DatagramPacket(putChunkBuf, putChunkBuf.length, getMDBGroup(),
                     getMDBPort());
             getMDBSocket().send(putChunkPacket);
-
             timesSent++;
 
             // Awaits for STORED messages
@@ -416,7 +411,6 @@ public class Peer implements RemoteInterface {
                 System.err.println("Thread sending PUTCHUNK messages was interrupted.");
                 e.printStackTrace();
             }
-
         } while ((storedRecord.getChunkInfo(chunkKey) != null
                 // Prevents peers sending PUTCHUNK caused by SPACE
                 // RECLAIMING from being registered as the file owner
@@ -466,43 +460,67 @@ public class Peer implements RemoteInterface {
         String reclaimMessage;
         String key;
         storedChunks.setAvailableStorage(availableStorage * 1000);
+        ArrayList<String> removedKeys = new ArrayList<>();
 
         for (ChunkInfo chunkInfo : storedChunks.getChunks()) {
-
-            if (storedChunks.getOccupiedStorage() <= storedChunks.getAvailableStorage())
-                break;
-
-            key = makeKey(Integer.toString(chunkInfo.getID()), chunkInfo.getFileID());
-            // <Version> REMOVED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
-            reclaimMessage = this.protocolVersion + " REMOVED " + ID + " " + chunkInfo.getFileID() + " "
-                    + chunkInfo.getID() + " " + CRLF + CRLF;
-
             try {
-                byte[] reclaimBuf = reclaimMessage.getBytes();
-                DatagramPacket reclaimPacket = new DatagramPacket(reclaimBuf, reclaimBuf.length, MCGroup, MCPort);
-                MCSocket.send(reclaimPacket);
+                final Path path = Paths.get(backupDirPath + "/" + chunkInfo.getFileID() + "/" + chunkInfo.getID());
+
+                if (Files.exists(path)) {
+                    if (storedChunks.getOccupiedStorage() <= storedChunks.getAvailableStorage())
+                        break;
+
+                    key = makeKey(Integer.toString(chunkInfo.getID()), chunkInfo.getFileID());
+                    // <Version> REMOVED <SenderId> <FileId> <ChunkNo> <CRLF><CRLF>
+                    reclaimMessage = this.protocolVersion + " REMOVED " + ID + " " + chunkInfo.getFileID() + " "
+                            + chunkInfo.getID() + " " + CRLF + CRLF;
+
+                    try {
+                        byte[] reclaimBuf = reclaimMessage.getBytes();
+                        DatagramPacket reclaimPacket = new DatagramPacket(reclaimBuf, reclaimBuf.length, MCGroup,
+                                MCPort);
+                        MCSocket.send(reclaimPacket);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+
+                    File backupDir = new File(backupDirPath);
+                    File fileIDDir = new File(backupDir.getPath(), chunkInfo.getFileID());
+                    File file = new File(fileIDDir.getPath(), Integer.toString(chunkInfo.getID()));
+                    // System.out.println("delete File " + chunkInfo.getID());
+                    file.delete();
+
+                    // Deletes fileID directory if it is empty after the file deletion
+                    File[] fileIDDirectory = fileIDDir.listFiles();
+                    if (fileIDDirectory != null) {
+                        if (fileIDDirectory.length == 0) {
+                            // System.out.println("delete da pasta");
+                            fileIDDir.delete();
+                        }
+                    }
+
+                    // Deletes backup directory if it is empty after the fileID directory deletion
+                    File[] backupDirectory = backupDir.listFiles();
+                    if (backupDirectory.length == 0) {
+                        // System.out.println("delete da pasta de backup");
+                        backupDir.delete();
+                    }
+
+                    storedChunks.updateOccupiedStorage(-1 * storedChunks.getChunkInfo(key).getSize());
+                    removedKeys.add(key);
+                }
+
             } catch (Exception e) {
+                System.err.println("Path exception: " + e.toString());
                 e.printStackTrace();
+                return;
             }
-
-            File backupDir = new File(backupDirPath);
-            File fileIDDir = new File(backupDir.getPath(), chunkInfo.getFileID());
-            File file = new File(fileIDDir.getPath(), Integer.toString(chunkInfo.getID()));
-            file.delete();
-
-            // Deletes fileID directory if it is empty after the file deletion
-            File[] fileIDDirectory = fileIDDir.listFiles();
-            if (fileIDDirectory.length == 0)
-                fileIDDir.delete();
-
-            // Deletes backup directory if it is empty after the fileID directory deletion
-            File[] backupDirectory = backupDir.listFiles();
-            if (backupDirectory.length == 0)
-                backupDir.delete();
-
-            storedChunks.remove(key);
-
         }
+
+        for (String aKey : removedKeys) {
+            storedChunks.remove(aKey);
+        }
+
     }
 
     public void restore(String fileName) throws IOException, NoSuchAlgorithmException {
@@ -522,12 +540,11 @@ public class Peer implements RemoteInterface {
         }
 
         File file = new File(fileName);
-        byte[] body = Files.readAllBytes(file.toPath());
         FileMetadata fileMetadata = new FileMetadata(file, 0);
         String fileID = fileMetadata.getID();
         fileMetadata.makeChunks();
         int numberChunks = fileMetadata.getChunks().size();
-
+        this.restoreRecord.clear();
         // If one of the chunks is not stored, the file itself should not be as well
         String key = makeKey(Integer.toString(fileMetadata.getChunks().get(0).getID()), fileID);
         if (storedRecord.getChunkInfo(key) == null) {
@@ -572,13 +589,13 @@ public class Peer implements RemoteInterface {
         state += storedRecord.print();
         state += "-------- Stored File Chunks --------\n";
         state += storedChunks.print();
-        state += "Maximum Storage Capacity: " + storedChunks.getAvailableStorage() / 1000 + " KBytes";
+        state += "Maximum Storage Capacity: " + storedChunks.getAvailableStorage() + " KBytes";
         DecimalFormat decimalFormat = new DecimalFormat("###.## %");
         double ratio = storedChunks.getAvailableStorage() != 0
                 ? (double) storedChunks.getOccupiedStorage() / storedChunks.getAvailableStorage()
                 : 0;
-        state += "\nOccupied Storage: " + storedChunks.getOccupiedStorage() / 1000 + " KBytes ( "
-                + decimalFormat.format(ratio) + " )\n";
+        state += "\nOccupied Storage: " + storedChunks.getOccupiedStorage() + " KBytes ( " + decimalFormat.format(ratio)
+                + " )\n";
 
         return state;
     }
@@ -612,12 +629,12 @@ public class Peer implements RemoteInterface {
 
             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
             for (Chunk chunk : restoreRecord.getRestoredChunks()) {
-                System.out.println("Copying form chunk " + chunk.getID());
+                System.out.println("Copying form chunk " + chunk.getID() + " with size " + chunk.getSize() + " to file "
+                        + realFileName);
                 byteArrayOutputStream.write(chunk.getData());
             }
 
             byte[] allChunks = byteArrayOutputStream.toByteArray();
-
             OutputStream outputStream = new FileOutputStream(restoreDirPath + "/" + realFileName);
             outputStream.write(allChunks);
             outputStream.close();
@@ -736,6 +753,7 @@ public class Peer implements RemoteInterface {
         File backupDir = new File(backupDirPath);
         File fileIDDir = new File(backupDir.getPath(), fileID);
         if (fileIDDir.exists()) {
+            storedChunks.removeFileChunksWithStorage(fileID);
             String[] entries = fileIDDir.list();
             for (String entry : entries) {
                 File currentFile = new File(fileIDDir.getPath(), entry);

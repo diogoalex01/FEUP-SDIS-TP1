@@ -56,6 +56,9 @@ public class TestClient {
                 System.out.println(state);
                 break;
             }
+            default:
+                System.out.println(subProtocol + " is not a valid subprotocol.");
+                break;
         }
     }
 }

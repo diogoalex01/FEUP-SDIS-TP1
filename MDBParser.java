@@ -1,6 +1,5 @@
 import java.io.FileOutputStream;
 import java.io.OutputStream;
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,11 +11,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.*;
 
 public class MDBParser implements Runnable {
-    private static final int BACKUP_BUFFER_SIZE = 64512; // bytes
     private static final String CRLF = "\r\n"; // CRLF delimiter
-    private static final int INITIAL_WAITING_TIME = 1000; // 1 second
     private static final int RANDOM_TIME = 400; // milliseconds
-    private static final int MAX_ATTEMPTS = 5;
     Peer peer;
     DatagramPacket packet;
 
@@ -142,6 +138,7 @@ public class MDBParser implements Runnable {
                             // Reply to sender
                             this.peer.getMCSocket().send(storedReply);
                             this.peer.getStoredChunks().getChunkInfo(key).updateActualReplicationDegree(1);
+                            this.peer.getStoredChunks().updateOccupiedStorage(chunkBody.length);
                         }
                     } catch (Exception e) {
                         e.printStackTrace();
