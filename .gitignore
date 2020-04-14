@@ -24,7 +24,6 @@ hs_err_pid*
 
 # Other files
 .DS_Store
-*.txt
 *.ser
 *.gif
 .vscode
