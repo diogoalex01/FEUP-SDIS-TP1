@@ -9,7 +9,7 @@ In the development of the project the following Java builds were used:
 
 In order to compile and run the source code, it is required to perform the following steps in the project's directory. Start by accessing it. If you're using Windows use the command line.
 
-    > cd sdis1920-t2g08/
+    > cd sdis1920-t2g08/src/
 
 Now, you'll be able to either manually run a set of commands, or if you're using Windows, you can simply execute a given batch file.
 
